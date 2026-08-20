@@ -133,20 +133,36 @@ jobs:
             exit 1
           fi
 
-          DBX_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-HOST --query value -o tsv)
-          DBX_CLIENT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-CLIENT-ID --query value -o tsv)
-          DBX_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-CLIENT-SECRET --query value -o tsv)
-          DBX_TENANT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-TENANT-ID --query value -o tsv)
+          get_kv_secret() {
+            local logical_name="$1"
+            shift
+            local candidate value
+            for candidate in "$@"; do
+              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
+                if [ -n "$value" ]; then
+                  echo "$value"
+                  return 0
+                fi
+              fi
+            done
+            echo "ERROR: Secret not found for $logical_name. Tried: $*" >&2
+            return 1
+          }
+
+          DBX_HOST=$(get_kv_secret "Databricks host" DATABRICKS-HOST DATABRICKS_HOST)
+          DBX_CLIENT_ID=$(get_kv_secret "Databricks client id" DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID)
+          DBX_CLIENT_SECRET=$(get_kv_secret "Databricks client secret" DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET)
+          DBX_TENANT_ID=$(get_kv_secret "Databricks tenant id" DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID)
 
           echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
 
-          TFSTATE_RG=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-RESOURCE-GROUP --query value -o tsv)
-          TFSTATE_SA=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-STORAGE-ACCOUNT --query value -o tsv)
-          TFSTATE_CONTAINER=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-CONTAINER-DBX-UDA --query value -o tsv)
-          TFSTATE_KEY=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-KEY --query value -o tsv)
+          TFSTATE_RG=$(get_kv_secret "TF state resource group" TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)
+          TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
+          TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA TFSTATE_CONTAINER)
+          TFSTATE_KEY=$(get_kv_secret "TF state key" TFSTATE-KEY TFSTATE_KEY)
 
           echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
           echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
@@ -252,20 +268,36 @@ jobs:
             exit 1
           fi
 
-          DBX_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-HOST --query value -o tsv)
-          DBX_CLIENT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-CLIENT-ID --query value -o tsv)
-          DBX_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-CLIENT-SECRET --query value -o tsv)
-          DBX_TENANT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-TENANT-ID --query value -o tsv)
+          get_kv_secret() {
+            local logical_name="$1"
+            shift
+            local candidate value
+            for candidate in "$@"; do
+              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
+                if [ -n "$value" ]; then
+                  echo "$value"
+                  return 0
+                fi
+              fi
+            done
+            echo "ERROR: Secret not found for $logical_name. Tried: $*" >&2
+            return 1
+          }
+
+          DBX_HOST=$(get_kv_secret "Databricks host" DATABRICKS-HOST DATABRICKS_HOST)
+          DBX_CLIENT_ID=$(get_kv_secret "Databricks client id" DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID)
+          DBX_CLIENT_SECRET=$(get_kv_secret "Databricks client secret" DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET)
+          DBX_TENANT_ID=$(get_kv_secret "Databricks tenant id" DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID)
 
           echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
 
-          TFSTATE_RG=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-RESOURCE-GROUP --query value -o tsv)
-          TFSTATE_SA=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-STORAGE-ACCOUNT --query value -o tsv)
-          TFSTATE_CONTAINER=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-CONTAINER-DBX-UDA --query value -o tsv)
-          TFSTATE_KEY=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-KEY --query value -o tsv)
+          TFSTATE_RG=$(get_kv_secret "TF state resource group" TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)
+          TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
+          TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA TFSTATE_CONTAINER)
+          TFSTATE_KEY=$(get_kv_secret "TF state key" TFSTATE-KEY TFSTATE_KEY)
 
           echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
           echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
