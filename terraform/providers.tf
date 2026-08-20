@@ -13,13 +13,9 @@ backend "azurerm" {}
 }
 
 provider "databricks" {
-  host = var.databricks_host
-
-  # Prefer PAT auth when available; otherwise fall back to Azure SP auth.
-  token = var.databricks_token != "" ? var.databricks_token : null
-
-  azure_client_id           = var.databricks_token == "" ? var.databricks_client_id : null
-  azure_client_secret       = var.databricks_token == "" ? var.databricks_client_secret : null
-  azure_tenant_id           = var.databricks_token == "" ? var.databricks_tenant_id : null
+  host                      = var.databricks_host
+  azure_client_id           = var.databricks_client_id
+  azure_client_secret       = var.databricks_client_secret
+  azure_tenant_id           = var.databricks_tenant_id
   azure_workspace_resource_id = var.databricks_workspace_resource_id != "" ? var.databricks_workspace_resource_id : null
 }

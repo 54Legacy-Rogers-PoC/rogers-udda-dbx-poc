@@ -53,13 +53,6 @@ variable "databricks_tenant_id" {
   default     = ""
 }
 
-variable "databricks_token" {
-  description = "Databricks PAT token (optional, preferred when provided)"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 variable "databricks_workspace_resource_id" {
   description = "Azure Databricks workspace resource ID (optional for Azure SP auth)"
   type        = string

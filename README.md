@@ -108,11 +108,10 @@ Azure login in GitHub Actions uses these repository secrets:
 The workflow reads these secrets at runtime:
 
 - `DATABRICKS-HOST`
-- `DATABRICKS-TOKEN` (optional)
-- `DATABRICKS-CLIENT-ID` (used when token is not provided)
-- `DATABRICKS-CLIENT-SECRET` (used when token is not provided)
-- `DATABRICKS-TENANT-ID` (used when token is not provided)
-- `DATABRICKS-WORKSPACE-RESOURCE-ID` (required when token is not provided)
+- `DATABRICKS-CLIENT-ID`
+- `DATABRICKS-CLIENT-SECRET`
+- `DATABRICKS-TENANT-ID`
+- `DATABRICKS-WORKSPACE-RESOURCE-ID` (required)
 
 The workflow also reads backend state configuration:
 
