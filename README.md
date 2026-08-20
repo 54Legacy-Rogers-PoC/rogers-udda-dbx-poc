@@ -97,6 +97,14 @@ Stages:
 
 ## Azure Key Vault Secrets
 
+Azure login in GitHub Actions uses these repository secrets:
+
+- `AZURE_CLIENT_ID` (or `SPN-GHA-DBX-MANOJ-ID`)
+- `AZURE_CLIENT_SECRET`
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_TENANT_ID`
+- `KEYVAULT_NAME`
+
 The workflow reads these secrets at runtime:
 
 - `DATABRICKS_HOST`
@@ -111,7 +119,7 @@ The workflow also reads backend state configuration:
 - `TFSTATE-CONTAINER-DBX-UDA`
 - `TFSTATE_KEY`
 
-These values must be present in the key vault configured by repository variable `KEYVAULT_NAME`.
+These values must be present in the key vault referenced by repository secret `KEYVAULT_NAME`.
 
 ## Local Execution
 

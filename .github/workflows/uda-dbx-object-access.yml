@@ -96,15 +96,40 @@ jobs:
           name: uda-generated
           path: generated
 
-      - name: Azure login
+      - name: Validate Azure auth secrets
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          set -euo pipefail
+          [ -n "$AZURE_CLIENT_ID" ] || { echo "ERROR: Missing secret AZURE_CLIENT_ID"; exit 1; }
+          [ -n "$AZURE_CLIENT_SECRET" ] || { echo "ERROR: Missing secret AZURE_CLIENT_SECRET"; exit 1; }
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || { echo "ERROR: Missing secret AZURE_SUBSCRIPTION_ID"; exit 1; }
+          [ -n "$AZURE_TENANT_ID" ] || { echo "ERROR: Missing secret AZURE_TENANT_ID"; exit 1; }
+
+      - name: Azure Login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: >-
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
 
       - name: Load Databricks credentials from Azure Key Vault
         env:
-          KEYVAULT_NAME: ${{ vars.KEYVAULT_NAME || 'kv-cpo-dev-cac' }}
+          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
         run: |
+          set -euo pipefail
+          if [ -z "$KEYVAULT_NAME" ]; then
+            echo "ERROR: KEYVAULT_NAME secret is missing."
+            exit 1
+          fi
+
           DBX_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_HOST --query value -o tsv)
           DBX_CLIENT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_ID --query value -o tsv)
           DBX_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_SECRET --query value -o tsv)
@@ -122,8 +147,14 @@ jobs:
 
       - name: Load Terraform backend config from Azure Key Vault
         env:
-          KEYVAULT_NAME: ${{ vars.KEYVAULT_NAME || 'kv-cpo-dev-cac' }}
+          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
         run: |
+          set -euo pipefail
+          if [ -z "$KEYVAULT_NAME" ]; then
+            echo "ERROR: KEYVAULT_NAME secret is missing."
+            exit 1
+          fi
+
           TFSTATE_RG=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_RESOURCE_GROUP --query value -o tsv)
           TFSTATE_SA=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_STORAGE_ACCOUNT --query value -o tsv)
           TFSTATE_CONTAINER=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-CONTAINER-DBX-UDA --query value -o tsv)
@@ -194,15 +225,40 @@ jobs:
           name: uda-terraform-plan
           path: terraform
 
-      - name: Azure login
+      - name: Validate Azure auth secrets
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          set -euo pipefail
+          [ -n "$AZURE_CLIENT_ID" ] || { echo "ERROR: Missing secret AZURE_CLIENT_ID"; exit 1; }
+          [ -n "$AZURE_CLIENT_SECRET" ] || { echo "ERROR: Missing secret AZURE_CLIENT_SECRET"; exit 1; }
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || { echo "ERROR: Missing secret AZURE_SUBSCRIPTION_ID"; exit 1; }
+          [ -n "$AZURE_TENANT_ID" ] || { echo "ERROR: Missing secret AZURE_TENANT_ID"; exit 1; }
+
+      - name: Azure Login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: >-
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
 
       - name: Load Databricks credentials from Azure Key Vault
         env:
-          KEYVAULT_NAME: ${{ vars.KEYVAULT_NAME || 'kv-cpo-dev-cac' }}
+          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
         run: |
+          set -euo pipefail
+          if [ -z "$KEYVAULT_NAME" ]; then
+            echo "ERROR: KEYVAULT_NAME secret is missing."
+            exit 1
+          fi
+
           DBX_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_HOST --query value -o tsv)
           DBX_CLIENT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_ID --query value -o tsv)
           DBX_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_SECRET --query value -o tsv)
@@ -220,8 +276,14 @@ jobs:
 
       - name: Load Terraform backend config from Azure Key Vault
         env:
-          KEYVAULT_NAME: ${{ vars.KEYVAULT_NAME || 'kv-cpo-dev-cac' }}
+          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
         run: |
+          set -euo pipefail
+          if [ -z "$KEYVAULT_NAME" ]; then
+            echo "ERROR: KEYVAULT_NAME secret is missing."
+            exit 1
+          fi
+
           TFSTATE_RG=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_RESOURCE_GROUP --query value -o tsv)
           TFSTATE_SA=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_STORAGE_ACCOUNT --query value -o tsv)
           TFSTATE_CONTAINER=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-CONTAINER-DBX-UDA --query value -o tsv)
