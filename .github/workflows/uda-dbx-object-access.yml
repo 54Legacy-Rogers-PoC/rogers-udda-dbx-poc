@@ -160,12 +160,18 @@ jobs:
       - name: Azure login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: |
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
 
       - name: Load Databricks secrets from Key Vault
         shell: bash
         run: |
-          KV="${{ secrets.AZURE_KEYVAULT_NAME }}"
+          KV="${{ secrets.KEYVAULT_NAME }}"
           echo "TF_VAR_databricks_host=$(az keyvault secret show --vault-name "$KV" --name DB-HOST --query value -o tsv)" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-ID --query value -o tsv)" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_secret=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-SECRET --query value -o tsv)" >> "$GITHUB_ENV"
@@ -221,12 +227,18 @@ jobs:
       - name: Azure login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: |
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
 
       - name: Load Databricks secrets from Key Vault
         shell: bash
         run: |
-          KV="${{ secrets.AZURE_KEYVAULT_NAME }}"
+          KV="${{ secrets.KEYVAULT_NAME }}"
           echo "TF_VAR_databricks_host=$(az keyvault secret show --vault-name "$KV" --name DB-HOST --query value -o tsv)" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-ID --query value -o tsv)" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_secret=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-SECRET --query value -o tsv)" >> "$GITHUB_ENV"
