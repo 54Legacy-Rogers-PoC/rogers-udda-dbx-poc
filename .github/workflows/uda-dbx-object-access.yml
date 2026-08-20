@@ -1,0 +1,245 @@
+name: UDA Databricks Object Access
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+  workflow_dispatch:
+    inputs:
+      request_file:
+        description: Path to request YAML file
+        required: true
+        default: uda/requests/object-access/RITM123456.yaml
+        type: string
+      attachments_dir:
+        description: Directory containing uploaded template attachments
+        required: true
+        default: uda/attachments/object-access
+        type: string
+      output_dir:
+        description: Directory to write parsed/tfvars/plan outputs
+        required: true
+        default: uda/output/object-access
+        type: string
+      run_plan:
+        description: Run Terraform plan stage
+        required: true
+        default: true
+        type: boolean
+      run_apply:
+        description: Run Terraform apply stage (main branch only)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uda-dbx-object-access-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-object-access:
+    runs-on: ubuntu-latest
+    env:
+      REQUEST_FILE: ${{ github.event_name == 'workflow_dispatch' && inputs.request_file || 'uda/requests/object-access/RITM123456.yaml' }}
+      ATTACHMENTS_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.attachments_dir || 'uda/attachments/object-access' }}
+      OUTPUT_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install workflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml openpyxl
+
+      - name: Prepare output paths
+        run: |
+          mkdir -p "$OUTPUT_DIR"
+          echo "PARSED_JSON=$OUTPUT_DIR/parsed-object-access.json" >> "$GITHUB_ENV"
+          echo "TFVARS_JSON=$OUTPUT_DIR/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+
+      - name: Resolve template path from request YAML
+        id: resolve_template
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import yaml
+
+          request_file = Path(os.environ["REQUEST_FILE"])
+          attachments_dir = Path(os.environ["ATTACHMENTS_DIR"])
+
+          with request_file.open("r", encoding="utf-8") as handle:
+              payload = yaml.safe_load(handle) or {}
+
+          template_file = str(payload.get("template_file", "")).strip()
+          if not template_file:
+              raise SystemExit("template_file is missing in request YAML")
+
+          resolved_path = attachments_dir / template_file
+          print(f"Resolved template file: {resolved_path}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"template_file={resolved_path}\n")
+          PY
+
+      - name: Validate request YAML
+        run: |
+          python uda/scripts/object-access/validate_request.py \
+            --request-file "$REQUEST_FILE" \
+            --attachments-dir "$ATTACHMENTS_DIR"
+
+      - name: Validate object access template
+        run: |
+          python uda/scripts/object-access/validate_template.py \
+            --template-file "${{ steps.resolve_template.outputs.template_file }}" \
+            --request-file "$REQUEST_FILE"
+
+      - name: Parse object access template
+        run: |
+          python uda/scripts/object-access/parse_template.py \
+            --template-file "${{ steps.resolve_template.outputs.template_file }}" \
+            --request-file "$REQUEST_FILE" \
+            --output-file "$PARSED_JSON"
+
+      - name: Generate tfvars JSON
+        run: |
+          python uda/scripts/object-access/generate_tfvars.py \
+            --input-json "$PARSED_JSON" \
+            --output-json "$TFVARS_JSON"
+
+      - name: Publish validate outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-dbx-object-access-validate-output
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: warn
+
+  plan-object-access:
+    needs: validate-object-access
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_plan }}
+    runs-on: ubuntu-latest
+    env:
+      REQUEST_FILE: ${{ github.event_name == 'workflow_dispatch' && inputs.request_file || 'uda/requests/object-access/RITM123456.yaml' }}
+      ATTACHMENTS_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.attachments_dir || 'uda/attachments/object-access' }}
+      OUTPUT_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Prepare output paths
+        run: |
+          mkdir -p "$OUTPUT_DIR"
+          echo "TFVARS_JSON=$OUTPUT_DIR/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFPLAN_BIN=$OUTPUT_DIR/object-access.tfplan" >> "$GITHUB_ENV"
+          echo "TFPLAN_TXT=$OUTPUT_DIR/object-access-plan.txt" >> "$GITHUB_ENV"
+
+      - name: Download validate outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-dbx-object-access-validate-output
+          path: ${{ env.OUTPUT_DIR }}
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Load Databricks secrets from Key Vault
+        shell: bash
+        run: |
+          KV="${{ secrets.AZURE_KEYVAULT_NAME }}"
+          echo "TF_VAR_databricks_host=$(az keyvault secret show --vault-name "$KV" --name DB-HOST --query value -o tsv)" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-ID --query value -o tsv)" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-SECRET --query value -o tsv)" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_tenant_id=$(az keyvault secret show --vault-name "$KV" --name DB-TENANT-ID --query value -o tsv)" >> "$GITHUB_ENV"
+
+      - name: Terraform init
+        run: terraform -chdir=terraform init
+
+      - name: Terraform validate
+        run: terraform -chdir=terraform validate
+
+      - name: Terraform plan
+        run: |
+          terraform -chdir=terraform plan \
+            -var-file="../$TFVARS_JSON" \
+            -out="../$TFPLAN_BIN"
+          terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
+
+      - name: Publish plan outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-dbx-object-access-plan-output
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: warn
+
+  apply-object-access:
+    needs: plan-object-access
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_apply && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      OUTPUT_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Prepare output paths
+        run: |
+          mkdir -p "$OUTPUT_DIR"
+          echo "TFPLAN_BIN=$OUTPUT_DIR/object-access.tfplan" >> "$GITHUB_ENV"
+
+      - name: Download plan outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-dbx-object-access-plan-output
+          path: ${{ env.OUTPUT_DIR }}
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Load Databricks secrets from Key Vault
+        shell: bash
+        run: |
+          KV="${{ secrets.AZURE_KEYVAULT_NAME }}"
+          echo "TF_VAR_databricks_host=$(az keyvault secret show --vault-name "$KV" --name DB-HOST --query value -o tsv)" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-ID --query value -o tsv)" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-SECRET --query value -o tsv)" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_tenant_id=$(az keyvault secret show --vault-name "$KV" --name DB-TENANT-ID --query value -o tsv)" >> "$GITHUB_ENV"
+
+      - name: Terraform init
+        run: terraform -chdir=terraform init
+
+      - name: Terraform apply
+        run: terraform -chdir=terraform apply -auto-approve "../$TFPLAN_BIN"
