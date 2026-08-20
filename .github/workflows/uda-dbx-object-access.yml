@@ -126,6 +126,9 @@ jobs:
       - name: Load Databricks and Terraform backend secrets from Azure Key Vault
         env:
           KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
           set -euo pipefail
           if [ -z "$KEYVAULT_NAME" ]; then
@@ -149,10 +152,31 @@ jobs:
             return 1
           }
 
+          try_kv_secret() {
+            local candidate value
+            for candidate in "$@"; do
+              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
+                if [ -n "$value" ]; then
+                  echo "$value"
+                  return 0
+                fi
+              fi
+            done
+            return 1
+          }
+
           DBX_HOST=$(get_kv_secret "Databricks host" DATABRICKS-HOST DATABRICKS_HOST)
-          DBX_CLIENT_ID=$(get_kv_secret "Databricks client id" DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID)
-          DBX_CLIENT_SECRET=$(get_kv_secret "Databricks client secret" DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET)
-          DBX_TENANT_ID=$(get_kv_secret "Databricks tenant id" DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID)
+          DBX_CLIENT_ID=$(try_kv_secret DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID || true)
+          DBX_CLIENT_SECRET=$(try_kv_secret DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET || true)
+          DBX_TENANT_ID=$(try_kv_secret DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID || true)
+
+          DBX_CLIENT_ID="${DBX_CLIENT_ID:-$AZURE_CLIENT_ID}"
+          DBX_CLIENT_SECRET="${DBX_CLIENT_SECRET:-$AZURE_CLIENT_SECRET}"
+          DBX_TENANT_ID="${DBX_TENANT_ID:-$AZURE_TENANT_ID}"
+
+          [ -n "$DBX_CLIENT_ID" ] || { echo "ERROR: Databricks client id not found in KV and AZURE_CLIENT_ID is empty."; exit 1; }
+          [ -n "$DBX_CLIENT_SECRET" ] || { echo "ERROR: Databricks client secret not found in KV and AZURE_CLIENT_SECRET is empty."; exit 1; }
+          [ -n "$DBX_TENANT_ID" ] || { echo "ERROR: Databricks tenant id not found in KV and AZURE_TENANT_ID is empty."; exit 1; }
 
           echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
@@ -261,6 +285,9 @@ jobs:
       - name: Load Databricks and Terraform backend secrets from Azure Key Vault
         env:
           KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
           set -euo pipefail
           if [ -z "$KEYVAULT_NAME" ]; then
@@ -284,10 +311,31 @@ jobs:
             return 1
           }
 
+          try_kv_secret() {
+            local candidate value
+            for candidate in "$@"; do
+              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
+                if [ -n "$value" ]; then
+                  echo "$value"
+                  return 0
+                fi
+              fi
+            done
+            return 1
+          }
+
           DBX_HOST=$(get_kv_secret "Databricks host" DATABRICKS-HOST DATABRICKS_HOST)
-          DBX_CLIENT_ID=$(get_kv_secret "Databricks client id" DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID)
-          DBX_CLIENT_SECRET=$(get_kv_secret "Databricks client secret" DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET)
-          DBX_TENANT_ID=$(get_kv_secret "Databricks tenant id" DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID)
+          DBX_CLIENT_ID=$(try_kv_secret DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID || true)
+          DBX_CLIENT_SECRET=$(try_kv_secret DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET || true)
+          DBX_TENANT_ID=$(try_kv_secret DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID || true)
+
+          DBX_CLIENT_ID="${DBX_CLIENT_ID:-$AZURE_CLIENT_ID}"
+          DBX_CLIENT_SECRET="${DBX_CLIENT_SECRET:-$AZURE_CLIENT_SECRET}"
+          DBX_TENANT_ID="${DBX_TENANT_ID:-$AZURE_TENANT_ID}"
+
+          [ -n "$DBX_CLIENT_ID" ] || { echo "ERROR: Databricks client id not found in KV and AZURE_CLIENT_ID is empty."; exit 1; }
+          [ -n "$DBX_CLIENT_SECRET" ] || { echo "ERROR: Databricks client secret not found in KV and AZURE_CLIENT_SECRET is empty."; exit 1; }
+          [ -n "$DBX_TENANT_ID" ] || { echo "ERROR: Databricks tenant id not found in KV and AZURE_TENANT_ID is empty."; exit 1; }
 
           echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
