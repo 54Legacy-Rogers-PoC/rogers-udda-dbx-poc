@@ -38,7 +38,6 @@ jobs:
       principal_type: ${{ steps.read_metadata.outputs.principal_type }}
       principal_name: ${{ steps.read_metadata.outputs.principal_name }}
       object_count: ${{ steps.read_metadata.outputs.object_count }}
-      terraform_vars_file: ${{ steps.read_metadata.outputs.terraform_vars_file }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -68,7 +67,6 @@ jobs:
           echo "principal_type=$(jq -r .principal_type generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "principal_name=$(jq -r .principal_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "object_count=$(jq -r .object_count generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
-          echo "terraform_vars_file=$(jq -r .terraform_vars_file generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
 
       - name: Upload generated artifacts
         uses: actions/upload-artifact@v4
@@ -125,7 +123,7 @@ jobs:
               "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
             }
 
-      - name: Load Databricks credentials from Azure Key Vault
+      - name: Load Databricks and Terraform backend secrets from Azure Key Vault
         env:
           KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
         run: |
@@ -135,35 +133,20 @@ jobs:
             exit 1
           fi
 
-          DBX_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_HOST --query value -o tsv)
-          DBX_CLIENT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_ID --query value -o tsv)
-          DBX_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_SECRET --query value -o tsv)
-          DBX_TENANT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_TENANT_ID --query value -o tsv)
-
-          echo "DATABRICKS_HOST=$DBX_HOST" >> "$GITHUB_ENV"
-          echo "DATABRICKS_CLIENT_ID=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
-          echo "DATABRICKS_CLIENT_SECRET=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
-          echo "DATABRICKS_TENANT_ID=$DBX_TENANT_ID" >> "$GITHUB_ENV"
+          DBX_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-HOST --query value -o tsv)
+          DBX_CLIENT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-CLIENT-ID --query value -o tsv)
+          DBX_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-CLIENT-SECRET --query value -o tsv)
+          DBX_TENANT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-TENANT-ID --query value -o tsv)
 
           echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
 
-      - name: Load Terraform backend config from Azure Key Vault
-        env:
-          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
-        run: |
-          set -euo pipefail
-          if [ -z "$KEYVAULT_NAME" ]; then
-            echo "ERROR: KEYVAULT_NAME secret is missing."
-            exit 1
-          fi
-
-          TFSTATE_RG=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_RESOURCE_GROUP --query value -o tsv)
-          TFSTATE_SA=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_STORAGE_ACCOUNT --query value -o tsv)
+          TFSTATE_RG=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-RESOURCE-GROUP --query value -o tsv)
+          TFSTATE_SA=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-STORAGE-ACCOUNT --query value -o tsv)
           TFSTATE_CONTAINER=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-CONTAINER-DBX-UDA --query value -o tsv)
-          TFSTATE_KEY=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_KEY --query value -o tsv)
+          TFSTATE_KEY=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-KEY --query value -o tsv)
 
           echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
           echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
@@ -259,7 +242,7 @@ jobs:
               "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
             }
 
-      - name: Load Databricks credentials from Azure Key Vault
+      - name: Load Databricks and Terraform backend secrets from Azure Key Vault
         env:
           KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
         run: |
@@ -269,35 +252,20 @@ jobs:
             exit 1
           fi
 
-          DBX_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_HOST --query value -o tsv)
-          DBX_CLIENT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_ID --query value -o tsv)
-          DBX_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_SECRET --query value -o tsv)
-          DBX_TENANT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_TENANT_ID --query value -o tsv)
-
-          echo "DATABRICKS_HOST=$DBX_HOST" >> "$GITHUB_ENV"
-          echo "DATABRICKS_CLIENT_ID=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
-          echo "DATABRICKS_CLIENT_SECRET=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
-          echo "DATABRICKS_TENANT_ID=$DBX_TENANT_ID" >> "$GITHUB_ENV"
+          DBX_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-HOST --query value -o tsv)
+          DBX_CLIENT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-CLIENT-ID --query value -o tsv)
+          DBX_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-CLIENT-SECRET --query value -o tsv)
+          DBX_TENANT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS-TENANT-ID --query value -o tsv)
 
           echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
 
-      - name: Load Terraform backend config from Azure Key Vault
-        env:
-          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
-        run: |
-          set -euo pipefail
-          if [ -z "$KEYVAULT_NAME" ]; then
-            echo "ERROR: KEYVAULT_NAME secret is missing."
-            exit 1
-          fi
-
-          TFSTATE_RG=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_RESOURCE_GROUP --query value -o tsv)
-          TFSTATE_SA=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_STORAGE_ACCOUNT --query value -o tsv)
+          TFSTATE_RG=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-RESOURCE-GROUP --query value -o tsv)
+          TFSTATE_SA=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-STORAGE-ACCOUNT --query value -o tsv)
           TFSTATE_CONTAINER=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-CONTAINER-DBX-UDA --query value -o tsv)
-          TFSTATE_KEY=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_KEY --query value -o tsv)
+          TFSTATE_KEY=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-KEY --query value -o tsv)
 
           echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
           echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"

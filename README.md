@@ -107,17 +107,17 @@ Azure login in GitHub Actions uses these repository secrets:
 
 The workflow reads these secrets at runtime:
 
-- `DATABRICKS_HOST`
-- `DATABRICKS_CLIENT_ID`
-- `DATABRICKS_CLIENT_SECRET`
-- `DATABRICKS_TENANT_ID`
+- `DATABRICKS-HOST`
+- `DATABRICKS-CLIENT-ID`
+- `DATABRICKS-CLIENT-SECRET`
+- `DATABRICKS-TENANT-ID`
 
 The workflow also reads backend state configuration:
 
-- `TFSTATE_RESOURCE_GROUP`
-- `TFSTATE_STORAGE_ACCOUNT`
+- `TFSTATE-RESOURCE-GROUP`
+- `TFSTATE-STORAGE-ACCOUNT`
 - `TFSTATE-CONTAINER-DBX-UDA`
-- `TFSTATE_KEY`
+- `TFSTATE-KEY`
 
 These values must be present in the key vault referenced by repository secret `KEYVAULT_NAME`.
 
