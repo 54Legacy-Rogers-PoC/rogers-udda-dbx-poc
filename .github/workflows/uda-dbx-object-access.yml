@@ -1,0 +1,285 @@
+name: UDA Databricks Object Access
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_file:
+        description: "Path to the Request-as-Code YAML"
+        required: true
+        default: "uda/requests/object-access/dev/RITMDEV0001.yaml"
+        type: string
+      auto_apply:
+        description: "Run terraform apply after successful plan"
+        required: true
+        default: false
+        type: boolean
+  push:
+    branches:
+      - main
+    paths:
+      - "uda/requests/object-access/**"
+      - "uda/attachments/object-access/**"
+      - "uda/scripts/**"
+      - "uda/config/**"
+      - "terraform/**"
+      - ".github/workflows/uda-dbx-object-access.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate_request:
+    name: Stage 1-3 Request and Template Validation
+    runs-on: ubuntu-latest
+    outputs:
+      request_id: ${{ steps.read_metadata.outputs.request_id }}
+      environment: ${{ steps.read_metadata.outputs.environment }}
+      principal_type: ${{ steps.read_metadata.outputs.principal_type }}
+      principal_name: ${{ steps.read_metadata.outputs.principal_name }}
+      object_count: ${{ steps.read_metadata.outputs.object_count }}
+      terraform_vars_file: ${{ steps.read_metadata.outputs.terraform_vars_file }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r uda/scripts/requirements.txt
+
+      - name: Process request artifact
+        run: |
+          python uda/scripts/process_request.py \
+            --request-file "${{ github.event.inputs.request_file || 'uda/requests/object-access/dev/RITMDEV0001.yaml' }}" \
+            --config-file "uda/config/environments.yaml" \
+            --output-dir "generated"
+
+      - name: Read request metadata
+        id: read_metadata
+        run: |
+          echo "request_id=$(jq -r .request_id generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "environment=$(jq -r .environment generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "principal_type=$(jq -r .principal_type generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "principal_name=$(jq -r .principal_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "object_count=$(jq -r .object_count generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "terraform_vars_file=$(jq -r .terraform_vars_file generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload generated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-generated
+          path: |
+            generated/terraform.auto.tfvars.json
+            generated/request_metadata.json
+            generated/execution_log.json
+
+  terraform_plan:
+    name: Stage 4 Terraform Plan
+    runs-on: ubuntu-latest
+    needs:
+      - validate_request
+    outputs:
+      tf_plan_status: ${{ steps.plan_status.outputs.tf_plan_status }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-generated
+          path: generated
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Load Databricks credentials from Azure Key Vault
+        env:
+          KEYVAULT_NAME: ${{ vars.KEYVAULT_NAME || 'kv-cpo-dev-cac' }}
+        run: |
+          DBX_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_HOST --query value -o tsv)
+          DBX_CLIENT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_ID --query value -o tsv)
+          DBX_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_SECRET --query value -o tsv)
+          DBX_TENANT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_TENANT_ID --query value -o tsv)
+
+          echo "DATABRICKS_HOST=$DBX_HOST" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_ID=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_SECRET=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
+          echo "DATABRICKS_TENANT_ID=$DBX_TENANT_ID" >> "$GITHUB_ENV"
+
+          echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
+
+      - name: Load Terraform backend config from Azure Key Vault
+        env:
+          KEYVAULT_NAME: ${{ vars.KEYVAULT_NAME || 'kv-cpo-dev-cac' }}
+        run: |
+          TFSTATE_RG=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_RESOURCE_GROUP --query value -o tsv)
+          TFSTATE_SA=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_STORAGE_ACCOUNT --query value -o tsv)
+          TFSTATE_CONTAINER=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-CONTAINER-DBX-UDA --query value -o tsv)
+          TFSTATE_KEY=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_KEY --query value -o tsv)
+
+          echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
+          echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
+          echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
+          echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+            -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+            -backend-config="container_name=$TFSTATE_CONTAINER" \
+            -backend-config="key=$TFSTATE_KEY" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Terraform validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var-file="../generated/terraform.auto.tfvars.json" \
+            -out="tfplan.binary"
+          terraform show -no-color tfplan.binary > tfplan.txt
+
+      - name: Set plan status
+        id: plan_status
+        run: echo "tf_plan_status=success" >> "$GITHUB_OUTPUT"
+
+      - name: Upload terraform plan output
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-terraform-plan
+          path: |
+            terraform/tfplan.binary
+            terraform/tfplan.txt
+
+  terraform_apply:
+    name: Stage 5 Terraform Apply
+    runs-on: ubuntu-latest
+    needs:
+      - validate_request
+      - terraform_plan
+    if: ${{ github.event_name == 'push' || github.event.inputs.auto_apply == 'true' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-generated
+          path: generated
+
+      - name: Download terraform plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-terraform-plan
+          path: terraform
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Load Databricks credentials from Azure Key Vault
+        env:
+          KEYVAULT_NAME: ${{ vars.KEYVAULT_NAME || 'kv-cpo-dev-cac' }}
+        run: |
+          DBX_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_HOST --query value -o tsv)
+          DBX_CLIENT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_ID --query value -o tsv)
+          DBX_CLIENT_SECRET=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_CLIENT_SECRET --query value -o tsv)
+          DBX_TENANT_ID=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name DATABRICKS_TENANT_ID --query value -o tsv)
+
+          echo "DATABRICKS_HOST=$DBX_HOST" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_ID=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_SECRET=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
+          echo "DATABRICKS_TENANT_ID=$DBX_TENANT_ID" >> "$GITHUB_ENV"
+
+          echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
+
+      - name: Load Terraform backend config from Azure Key Vault
+        env:
+          KEYVAULT_NAME: ${{ vars.KEYVAULT_NAME || 'kv-cpo-dev-cac' }}
+        run: |
+          TFSTATE_RG=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_RESOURCE_GROUP --query value -o tsv)
+          TFSTATE_SA=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_STORAGE_ACCOUNT --query value -o tsv)
+          TFSTATE_CONTAINER=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE-CONTAINER-DBX-UDA --query value -o tsv)
+          TFSTATE_KEY=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name TFSTATE_KEY --query value -o tsv)
+
+          echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
+          echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
+          echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
+          echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+            -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+            -backend-config="container_name=$TFSTATE_CONTAINER" \
+            -backend-config="key=$TFSTATE_KEY" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Terraform apply
+        working-directory: terraform
+        run: terraform apply -auto-approve tfplan.binary
+
+  notification:
+    name: Stage 6 Notification and Summary
+    runs-on: ubuntu-latest
+    needs:
+      - validate_request
+      - terraform_plan
+      - terraform_apply
+    if: always()
+    steps:
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-generated
+          path: generated
+
+      - name: Publish workflow summary
+        run: |
+          {
+            echo "## Databricks Object Access Execution Summary"
+            echo ""
+            echo "- Request ID: ${{ needs.validate_request.outputs.request_id }}"
+            echo "- Principal Type: ${{ needs.validate_request.outputs.principal_type }}"
+            echo "- Principal Name: ${{ needs.validate_request.outputs.principal_name }}"
+            echo "- Environment: ${{ needs.validate_request.outputs.environment }}"
+            echo "- Number of Objects Processed: ${{ needs.validate_request.outputs.object_count }}"
+            echo "- Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}"
+            echo "- Apply Executed: ${{ github.event_name == 'push' || github.event.inputs.auto_apply == 'true' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive execution log
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-execution-log
+          path: generated/execution_log.json

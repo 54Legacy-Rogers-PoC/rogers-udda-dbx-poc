@@ -1,0 +1,10 @@
+request_id: RITMDEV0001
+platform: databricks
+request_type: object_access
+environment: Development
+activity_type: ADD
+access_for: ad_group
+ad_group_name: DTB_FINANCE_ANALYTICS_DEV
+template_file: ObjectAccessTemplate.csv
+justification: DEV object access validation
+additional_information: Dedicated DEV preset request for workflow dispatch

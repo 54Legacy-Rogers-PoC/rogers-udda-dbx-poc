@@ -1,0 +1,5 @@
+Object Type,Activity,Catalog Name,Schema Name,Object Name,Folder Path,Privileges
+catalog,ADD,finance_catalog,,,,USE_CATALOG
+schema,ADD,finance_catalog,reporting,,,"USE_SCHEMA,SELECT"
+view,ADD,finance_catalog,reporting,vw_quarterly_revenue,,SELECT
+folder,ADD,,,,/Shared/finance-reports,CAN_READ
