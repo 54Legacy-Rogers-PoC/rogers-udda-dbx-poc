@@ -109,6 +109,11 @@ jobs:
           [ -n "$AZURE_SUBSCRIPTION_ID" ] || { echo "ERROR: Missing secret AZURE_SUBSCRIPTION_ID"; exit 1; }
           [ -n "$AZURE_TENANT_ID" ] || { echo "ERROR: Missing secret AZURE_TENANT_ID"; exit 1; }
 
+          guid_regex='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
+          [[ "$AZURE_CLIENT_ID" =~ $guid_regex ]] || { echo "ERROR: AZURE_CLIENT_ID must be a GUID Application (client) ID."; exit 1; }
+          [[ "$AZURE_TENANT_ID" =~ $guid_regex ]] || { echo "ERROR: AZURE_TENANT_ID must be a GUID Directory (tenant) ID."; exit 1; }
+          [[ "$AZURE_SUBSCRIPTION_ID" =~ $guid_regex ]] || { echo "ERROR: AZURE_SUBSCRIPTION_ID must be a GUID subscription ID."; exit 1; }
+
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -237,6 +242,11 @@ jobs:
           [ -n "$AZURE_CLIENT_SECRET" ] || { echo "ERROR: Missing secret AZURE_CLIENT_SECRET"; exit 1; }
           [ -n "$AZURE_SUBSCRIPTION_ID" ] || { echo "ERROR: Missing secret AZURE_SUBSCRIPTION_ID"; exit 1; }
           [ -n "$AZURE_TENANT_ID" ] || { echo "ERROR: Missing secret AZURE_TENANT_ID"; exit 1; }
+
+          guid_regex='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
+          [[ "$AZURE_CLIENT_ID" =~ $guid_regex ]] || { echo "ERROR: AZURE_CLIENT_ID must be a GUID Application (client) ID."; exit 1; }
+          [[ "$AZURE_TENANT_ID" =~ $guid_regex ]] || { echo "ERROR: AZURE_TENANT_ID must be a GUID Directory (tenant) ID."; exit 1; }
+          [[ "$AZURE_SUBSCRIPTION_ID" =~ $guid_regex ]] || { echo "ERROR: AZURE_SUBSCRIPTION_ID must be a GUID subscription ID."; exit 1; }
 
       - name: Azure Login
         uses: azure/login@v2
