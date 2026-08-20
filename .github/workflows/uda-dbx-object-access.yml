@@ -187,11 +187,13 @@ jobs:
           TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
           TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA TFSTATE_CONTAINER)
           TFSTATE_KEY=$(get_kv_secret "TF state key" TFSTATE-KEY TFSTATE_KEY)
+          TFSTATE_ACCESS_KEY=$(try_kv_secret TFSTATE-ACCESS-KEY TFSTATE_ACCESS_KEY || true)
 
           echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
           echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
           echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
           echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
+          echo "TFSTATE_ACCESS_KEY=$TFSTATE_ACCESS_KEY" >> "$GITHUB_ENV"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -199,12 +201,24 @@ jobs:
       - name: Terraform init
         working-directory: terraform
         run: |
-          terraform init \
-            -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
-            -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
-            -backend-config="container_name=$TFSTATE_CONTAINER" \
-            -backend-config="key=$TFSTATE_KEY" \
-            -backend-config="use_azuread_auth=true"
+          set -euo pipefail
+          if [ -n "${TFSTATE_ACCESS_KEY:-}" ]; then
+            echo "Using Terraform backend auth mode: access_key"
+            terraform init \
+              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+              -backend-config="container_name=$TFSTATE_CONTAINER" \
+              -backend-config="key=$TFSTATE_KEY" \
+              -backend-config="access_key=$TFSTATE_ACCESS_KEY"
+          else
+            echo "Using Terraform backend auth mode: azuread_auth"
+            terraform init \
+              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+              -backend-config="container_name=$TFSTATE_CONTAINER" \
+              -backend-config="key=$TFSTATE_KEY" \
+              -backend-config="use_azuread_auth=true"
+          fi
 
       - name: Terraform validate
         working-directory: terraform
@@ -346,11 +360,13 @@ jobs:
           TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
           TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA TFSTATE_CONTAINER)
           TFSTATE_KEY=$(get_kv_secret "TF state key" TFSTATE-KEY TFSTATE_KEY)
+          TFSTATE_ACCESS_KEY=$(try_kv_secret TFSTATE-ACCESS-KEY TFSTATE_ACCESS_KEY || true)
 
           echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
           echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
           echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
           echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
+          echo "TFSTATE_ACCESS_KEY=$TFSTATE_ACCESS_KEY" >> "$GITHUB_ENV"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -358,12 +374,24 @@ jobs:
       - name: Terraform init
         working-directory: terraform
         run: |
-          terraform init \
-            -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
-            -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
-            -backend-config="container_name=$TFSTATE_CONTAINER" \
-            -backend-config="key=$TFSTATE_KEY" \
-            -backend-config="use_azuread_auth=true"
+          set -euo pipefail
+          if [ -n "${TFSTATE_ACCESS_KEY:-}" ]; then
+            echo "Using Terraform backend auth mode: access_key"
+            terraform init \
+              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+              -backend-config="container_name=$TFSTATE_CONTAINER" \
+              -backend-config="key=$TFSTATE_KEY" \
+              -backend-config="access_key=$TFSTATE_ACCESS_KEY"
+          else
+            echo "Using Terraform backend auth mode: azuread_auth"
+            terraform init \
+              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+              -backend-config="container_name=$TFSTATE_CONTAINER" \
+              -backend-config="key=$TFSTATE_KEY" \
+              -backend-config="use_azuread_auth=true"
+          fi
 
       - name: Terraform apply
         working-directory: terraform

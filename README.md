@@ -118,6 +118,12 @@ The workflow also reads backend state configuration:
 - `TFSTATE-STORAGE-ACCOUNT`
 - `TFSTATE-CONTAINER-DBX-UDA`
 - `TFSTATE-KEY`
+- `TFSTATE-ACCESS-KEY` (optional fallback)
+
+Backend auth behavior:
+
+- If `TFSTATE-ACCESS-KEY` exists, Terraform backend uses `access_key` auth.
+- If `TFSTATE-ACCESS-KEY` is absent, Terraform backend uses Azure AD auth (`use_azuread_auth=true`) and requires blob data permissions on the state container/account.
 
 These values must be present in the key vault referenced by repository secret `KEYVAULT_NAME`.
 
