@@ -172,10 +172,21 @@ jobs:
         shell: bash
         run: |
           KV="${{ secrets.KEYVAULT_NAME }}"
-          echo "TF_VAR_databricks_host=$(az keyvault secret show --vault-name "$KV" --name DB-HOST --query value -o tsv)" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_id=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-ID --query value -o tsv)" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_secret=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-SECRET --query value -o tsv)" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_tenant_id=$(az keyvault secret show --vault-name "$KV" --name DB-TENANT-ID --query value -o tsv)" >> "$GITHUB_ENV"
+          DATABRICKS_HOST_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv)"
+          DATABRICKS_TOKEN_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-TOKEN --query value -o tsv)"
+
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_TOKEN_VALUE; do
+            if [ -z "${!v}" ]; then
+              echo "Missing or empty secret value for $v from Key Vault $KV" >&2
+              exit 1
+            fi
+          done
+
+          echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_token=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
+
+          echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_TOKEN=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
 
       - name: Terraform init
         run: terraform -chdir=terraform init
@@ -239,10 +250,21 @@ jobs:
         shell: bash
         run: |
           KV="${{ secrets.KEYVAULT_NAME }}"
-          echo "TF_VAR_databricks_host=$(az keyvault secret show --vault-name "$KV" --name DB-HOST --query value -o tsv)" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_id=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-ID --query value -o tsv)" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_secret=$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-SECRET --query value -o tsv)" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_tenant_id=$(az keyvault secret show --vault-name "$KV" --name DB-TENANT-ID --query value -o tsv)" >> "$GITHUB_ENV"
+          DATABRICKS_HOST_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv)"
+          DATABRICKS_TOKEN_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-TOKEN --query value -o tsv)"
+
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_TOKEN_VALUE; do
+            if [ -z "${!v}" ]; then
+              echo "Missing or empty secret value for $v from Key Vault $KV" >&2
+              exit 1
+            fi
+          done
+
+          echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_token=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
+
+          echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_TOKEN=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
 
       - name: Terraform init
         run: terraform -chdir=terraform init

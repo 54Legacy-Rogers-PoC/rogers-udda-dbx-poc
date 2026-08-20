@@ -84,20 +84,32 @@ variable "databricks_host" {
   sensitive   = true
 }
 
+variable "databricks_token" {
+  description = "Databricks PAT token for provider authentication."
+  type        = string
+  sensitive   = true
+}
+
 variable "databricks_client_id" {
   description = "Databricks/Azure AD client ID for provider authentication."
   type        = string
+  default     = null
+  nullable    = true
   sensitive   = true
 }
 
 variable "databricks_client_secret" {
   description = "Databricks/Azure AD client secret for provider authentication."
   type        = string
+  default     = null
+  nullable    = true
   sensitive   = true
 }
 
 variable "databricks_tenant_id" {
   description = "Azure tenant ID used by Databricks provider authentication."
   type        = string
+  default     = null
+  nullable    = true
   sensitive   = true
 }
