@@ -188,6 +188,11 @@ jobs:
             exit 1
           fi
 
+          if [[ "$DATABRICKS_HOST_VALUE" == *"accounts."* ]]; then
+            echo "DATABRICKS-HOST points to an account console URL ($DATABRICKS_HOST_VALUE). Use a workspace URL like https://adb-<workspace-id>.<region>.azuredatabricks.net." >&2
+            exit 1
+          fi
+
           echo "::add-mask::$DATABRICKS_TOKEN_VALUE"
 
           echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
@@ -202,6 +207,14 @@ jobs:
           STATUS_CODE="$(curl -sS -o /tmp/dbx_me.json -w "%{http_code}" \
             -H "Authorization: Bearer $DATABRICKS_TOKEN" \
             "$DATABRICKS_HOST/api/2.0/current-user/me")"
+
+          if [ "$STATUS_CODE" = "404" ]; then
+            echo "Databricks token validation returned HTTP 404 on $DATABRICKS_HOST/api/2.0/current-user/me" >&2
+            echo "This usually means DATABRICKS-HOST is not a workspace endpoint." >&2
+            echo "Set DATABRICKS-HOST to the workspace URL only (for example https://adb-<workspace-id>.<region>.azuredatabricks.net)." >&2
+            cat /tmp/dbx_me.json >&2
+            exit 1
+          fi
 
           if [ "$STATUS_CODE" != "200" ]; then
             echo "Databricks token validation failed with HTTP $STATUS_CODE" >&2
@@ -310,6 +323,11 @@ jobs:
             exit 1
           fi
 
+          if [[ "$DATABRICKS_HOST_VALUE" == *"accounts."* ]]; then
+            echo "DATABRICKS-HOST points to an account console URL ($DATABRICKS_HOST_VALUE). Use a workspace URL like https://adb-<workspace-id>.<region>.azuredatabricks.net." >&2
+            exit 1
+          fi
+
           echo "::add-mask::$DATABRICKS_TOKEN_VALUE"
 
           echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
@@ -324,6 +342,14 @@ jobs:
           STATUS_CODE="$(curl -sS -o /tmp/dbx_me.json -w "%{http_code}" \
             -H "Authorization: Bearer $DATABRICKS_TOKEN" \
             "$DATABRICKS_HOST/api/2.0/current-user/me")"
+
+          if [ "$STATUS_CODE" = "404" ]; then
+            echo "Databricks token validation returned HTTP 404 on $DATABRICKS_HOST/api/2.0/current-user/me" >&2
+            echo "This usually means DATABRICKS-HOST is not a workspace endpoint." >&2
+            echo "Set DATABRICKS-HOST to the workspace URL only (for example https://adb-<workspace-id>.<region>.azuredatabricks.net)." >&2
+            cat /tmp/dbx_me.json >&2
+            exit 1
+          fi
 
           if [ "$STATUS_CODE" != "200" ]; then
             echo "Databricks token validation failed with HTTP $STATUS_CODE" >&2
