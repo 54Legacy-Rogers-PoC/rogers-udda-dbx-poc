@@ -45,9 +45,11 @@ if ($SkipTerraform) {
 }
 
 if ($RequestType -eq "service-account") {
-    Write-Host "Service-account Terraform resources are not implemented in this repo yet."
-    Write-Host "Generated metadata artifacts are available under ./generated."
-    exit 0
+    $metadata = Get-Content -Path "generated/request_metadata.json" -Raw | ConvertFrom-Json
+    if (-not $metadata.requires_terraform) {
+        Write-Host "Service-account request is metadata-only. Terraform not required."
+        exit 0
+    }
 }
 
 terraform -chdir=terraform init

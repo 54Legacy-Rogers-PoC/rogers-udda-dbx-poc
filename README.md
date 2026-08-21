@@ -119,8 +119,9 @@ Supported activity types:
 Current behavior:
 
 - Metadata-only activities are processed and governance payload artifacts are generated.
-- Cluster access activities are detected as Terraform-required and the workflow fails intentionally with a clear "not implemented" message.
-- This prevents false-positive provisioning success until service-account Terraform resources are added.
+- Cluster access add (`add_to_cluster`) runs Terraform plan/apply through `.github/workflows/uda-dbx-service-account.yml` when `requires_terraform` is true.
+- Cluster access remove (`remove_from_cluster`) runs a safe ACL-preserving update script to remove only the target service account entry while keeping other existing ACL entries.
+- CM writeback is executed after successful metadata-only processing, after successful Terraform apply for add-to-cluster actions, or after successful ACL-preserving remove execution for remove-from-cluster actions.
 
 ## Azure Key Vault Secrets
 

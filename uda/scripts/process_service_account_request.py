@@ -25,6 +25,8 @@ class RequestContext:
     attached_to_ad_group: bool | None
     ad_group_name: str
     cluster_name: str
+    cluster_id: str
+    cluster_permission_level: str
     subscription: str
     resource_group_name: str
     workspace_name: str
@@ -121,6 +123,8 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
 
     ad_group_name = str(request.get("ad_group_name", "")).strip()
     cluster_name = str(request.get("cluster_name", "")).strip()
+    cluster_id = str(request.get("cluster_id", "")).strip()
+    cluster_permission_level = str(request.get("cluster_permission_level", "CAN_ATTACH_TO")).strip().upper()
 
     if activity_type == "CREATE":
         if attached_to_ad_group is None:
@@ -136,6 +140,13 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
     if activity_type in {"ADD_TO_CLUSTER", "REMOVE_FROM_CLUSTER"} and not cluster_name:
         raise ValidationError(f"Field cluster_name is required for {activity_type} activity")
 
+    allowed_cluster_permission_levels = {"CAN_ATTACH_TO", "CAN_RESTART", "CAN_MANAGE"}
+    if cluster_permission_level not in allowed_cluster_permission_levels:
+        allowed_levels = ", ".join(sorted(allowed_cluster_permission_levels))
+        raise ValidationError(
+            f"Unsupported cluster_permission_level '{cluster_permission_level}'. Allowed values: {allowed_levels}"
+        )
+
     return RequestContext(
         request_id=str(request["request_id"]).strip(),
         platform=str(request["platform"]).strip().lower(),
@@ -148,6 +159,8 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
         attached_to_ad_group=attached_to_ad_group,
         ad_group_name=ad_group_name,
         cluster_name=cluster_name,
+        cluster_id=cluster_id,
+        cluster_permission_level=cluster_permission_level,
         subscription=str(request.get("subscription", "")).strip(),
         resource_group_name=str(request.get("resource_group_name", "")).strip(),
         workspace_name=str(request.get("workspace_name", "")).strip(),
@@ -164,6 +177,24 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
 
 def requires_terraform(activity_type: str) -> bool:
     return activity_type in {"ADD_TO_CLUSTER", "REMOVE_FROM_CLUSTER"}
+
+
+def build_cluster_access_records(context: RequestContext) -> list[dict[str, Any]]:
+    if context.activity_type not in {"ADD_TO_CLUSTER", "REMOVE_FROM_CLUSTER"}:
+        return []
+
+    resolved_cluster_id = context.cluster_id or context.cluster_name
+
+    return [
+        {
+            "row_id": f"{context.request_id}-00001",
+            "activity": context.activity_type,
+            "service_account_name": context.service_account_name,
+            "cluster_name": context.cluster_name,
+            "cluster_id": resolved_cluster_id,
+            "permission_level": context.cluster_permission_level,
+        }
+    ]
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -200,12 +231,14 @@ def main() -> None:
         raise ValidationError("request_type must be service_account")
 
     terraform_required = requires_terraform(context.activity_type)
+    cluster_access_records = build_cluster_access_records(context)
 
     # Keep a tfvars file present so downstream jobs can inspect request identity consistently.
     terraform_vars = {
         "request_id": context.request_id,
         "environment": context.environment,
         "object_access_records": [],
+        "service_account_cluster_access_records": cluster_access_records,
     }
     tfvars_file = output_dir / "terraform.auto.tfvars.json"
     write_json(tfvars_file, terraform_vars)
@@ -222,6 +255,8 @@ def main() -> None:
         "attached_to_ad_group": context.attached_to_ad_group,
         "ad_group_name": context.ad_group_name,
         "cluster_name": context.cluster_name,
+        "cluster_id": context.cluster_id,
+        "cluster_permission_level": context.cluster_permission_level,
         "requires_terraform": terraform_required,
         "terraform_vars_file": str(tfvars_file),
     }
