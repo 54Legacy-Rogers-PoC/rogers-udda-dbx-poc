@@ -246,8 +246,9 @@ jobs:
           get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
           get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
           get_kv_secret TFSTATE_KEY_VALUE TFSTATE-KEY-DBX TFSTATE-KEY
+          get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
 
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_VALUE; do
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
@@ -265,6 +266,7 @@ jobs:
           fi
 
           echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
+          echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
 
           echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
@@ -274,6 +276,7 @@ jobs:
           echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_KEY=$TFSTATE_KEY_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE" >> "$GITHUB_ENV"
 
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
@@ -290,13 +293,13 @@ jobs:
               -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
               -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
               -backend-config="key=$TF_BACKEND_KEY" \
-              -backend-config="use_azuread_auth=true" 2>&1 | tee "$init_log"; then
+              -backend-config="access_key=$TF_BACKEND_ACCESS_KEY" 2>&1 | tee "$init_log"; then
               exit 0
             fi
 
-            if grep -qi "AuthorizationPermissionMismatch" "$init_log" || grep -qi "unexpected status 403" "$init_log"; then
-              echo "Terraform backend authorization failed (403)." >&2
-              echo "Grant the GitHub service principal Storage Blob Data Contributor on the state container or storage account, then rerun." >&2
+            if grep -qi "AuthorizationPermissionMismatch" "$init_log" || grep -qi "unexpected status 403" "$init_log" || grep -qi "AuthenticationFailed" "$init_log"; then
+              echo "Terraform backend authentication/authorization failed." >&2
+              echo "Verify TFSTATE-STORAGE-ACCESS-KEY (or alias) matches storage account $TF_BACKEND_STORAGE_ACCOUNT_NAME and has access to container $TF_BACKEND_CONTAINER_NAME." >&2
               echo "Backend target: account=$TF_BACKEND_STORAGE_ACCOUNT_NAME container=$TF_BACKEND_CONTAINER_NAME key=$TF_BACKEND_KEY" >&2
               exit 1
             fi
@@ -417,8 +420,9 @@ jobs:
           get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
           get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
           get_kv_secret TFSTATE_KEY_VALUE TFSTATE-KEY-DBX TFSTATE-KEY
+          get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
 
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_VALUE; do
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
@@ -436,6 +440,7 @@ jobs:
           fi
 
           echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
+          echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
 
           echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
@@ -445,6 +450,7 @@ jobs:
           echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_KEY=$TFSTATE_KEY_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE" >> "$GITHUB_ENV"
 
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
@@ -461,13 +467,13 @@ jobs:
               -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
               -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
               -backend-config="key=$TF_BACKEND_KEY" \
-              -backend-config="use_azuread_auth=true" 2>&1 | tee "$init_log"; then
+              -backend-config="access_key=$TF_BACKEND_ACCESS_KEY" 2>&1 | tee "$init_log"; then
               exit 0
             fi
 
-            if grep -qi "AuthorizationPermissionMismatch" "$init_log" || grep -qi "unexpected status 403" "$init_log"; then
-              echo "Terraform backend authorization failed (403)." >&2
-              echo "Grant the GitHub service principal Storage Blob Data Contributor on the state container or storage account, then rerun." >&2
+            if grep -qi "AuthorizationPermissionMismatch" "$init_log" || grep -qi "unexpected status 403" "$init_log" || grep -qi "AuthenticationFailed" "$init_log"; then
+              echo "Terraform backend authentication/authorization failed." >&2
+              echo "Verify TFSTATE-STORAGE-ACCESS-KEY (or alias) matches storage account $TF_BACKEND_STORAGE_ACCOUNT_NAME and has access to container $TF_BACKEND_CONTAINER_NAME." >&2
               echo "Backend target: account=$TF_BACKEND_STORAGE_ACCOUNT_NAME container=$TF_BACKEND_CONTAINER_NAME key=$TF_BACKEND_KEY" >&2
               exit 1
             fi
