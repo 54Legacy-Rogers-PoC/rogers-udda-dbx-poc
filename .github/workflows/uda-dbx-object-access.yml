@@ -204,6 +204,7 @@ jobs:
       - name: Validate Databricks token
         shell: bash
         run: |
+          DBX_ERROR_BODY=""
           STATUS_CODE="$(curl -sS -o /tmp/dbx_me.json -w "%{http_code}" \
             -H "Authorization: Bearer $DATABRICKS_TOKEN" \
             "$DATABRICKS_HOST/api/2.0/preview/scim/v2/Me")"
@@ -214,29 +215,40 @@ jobs:
             STATUS_CODE="$(curl -sS -o /tmp/dbx_me_fallback.json -w "%{http_code}" \
               -H "Authorization: Bearer $DATABRICKS_TOKEN" \
               "$DATABRICKS_HOST/api/2.0/clusters/list")"
+            DBX_ERROR_BODY="/tmp/dbx_me_fallback.json"
             if [ "$STATUS_CODE" = "404" ]; then
               echo "Fallback endpoint also returned 404. DATABRICKS-HOST may be incorrect for workspace APIs." >&2
               echo "Use workspace URL only (for example https://adb-<workspace-id>.<region>.azuredatabricks.net)." >&2
               cat /tmp/dbx_me_fallback.json >&2
               exit 1
             fi
+          else
+            DBX_ERROR_BODY="/tmp/dbx_me.json"
+          fi
+
+          if [ "$STATUS_CODE" = "401" ] || [ "$STATUS_CODE" = "403" ]; then
+            if grep -qi "Invalid access token" "$DBX_ERROR_BODY"; then
+              echo "Databricks rejected the token (invalid/expired/revoked or wrong workspace host)." >&2
+              cat "$DBX_ERROR_BODY" >&2
+              exit 1
+            fi
           fi
 
           if [ "$STATUS_CODE" = "401" ]; then
             echo "Databricks token validation failed with HTTP 401 (invalid/expired token)." >&2
-            cat /tmp/dbx_me.json >&2
+            cat "$DBX_ERROR_BODY" >&2
             exit 1
           fi
 
           if [ "$STATUS_CODE" = "403" ]; then
             echo "Databricks token is valid but does not have required permissions (HTTP 403)." >&2
-            cat /tmp/dbx_me.json >&2
+            cat "$DBX_ERROR_BODY" >&2
             exit 1
           fi
 
           if [ "$STATUS_CODE" != "200" ]; then
             echo "Databricks token validation failed with HTTP $STATUS_CODE" >&2
-            cat /tmp/dbx_me.json >&2
+            cat "$DBX_ERROR_BODY" >&2
             exit 1
           fi
 
@@ -357,6 +369,7 @@ jobs:
       - name: Validate Databricks token
         shell: bash
         run: |
+          DBX_ERROR_BODY=""
           STATUS_CODE="$(curl -sS -o /tmp/dbx_me.json -w "%{http_code}" \
             -H "Authorization: Bearer $DATABRICKS_TOKEN" \
             "$DATABRICKS_HOST/api/2.0/preview/scim/v2/Me")"
@@ -367,29 +380,40 @@ jobs:
             STATUS_CODE="$(curl -sS -o /tmp/dbx_me_fallback.json -w "%{http_code}" \
               -H "Authorization: Bearer $DATABRICKS_TOKEN" \
               "$DATABRICKS_HOST/api/2.0/clusters/list")"
+            DBX_ERROR_BODY="/tmp/dbx_me_fallback.json"
             if [ "$STATUS_CODE" = "404" ]; then
               echo "Fallback endpoint also returned 404. DATABRICKS-HOST may be incorrect for workspace APIs." >&2
               echo "Use workspace URL only (for example https://adb-<workspace-id>.<region>.azuredatabricks.net)." >&2
               cat /tmp/dbx_me_fallback.json >&2
               exit 1
             fi
+          else
+            DBX_ERROR_BODY="/tmp/dbx_me.json"
+          fi
+
+          if [ "$STATUS_CODE" = "401" ] || [ "$STATUS_CODE" = "403" ]; then
+            if grep -qi "Invalid access token" "$DBX_ERROR_BODY"; then
+              echo "Databricks rejected the token (invalid/expired/revoked or wrong workspace host)." >&2
+              cat "$DBX_ERROR_BODY" >&2
+              exit 1
+            fi
           fi
 
           if [ "$STATUS_CODE" = "401" ]; then
             echo "Databricks token validation failed with HTTP 401 (invalid/expired token)." >&2
-            cat /tmp/dbx_me.json >&2
+            cat "$DBX_ERROR_BODY" >&2
             exit 1
           fi
 
           if [ "$STATUS_CODE" = "403" ]; then
             echo "Databricks token is valid but does not have required permissions (HTTP 403)." >&2
-            cat /tmp/dbx_me.json >&2
+            cat "$DBX_ERROR_BODY" >&2
             exit 1
           fi
 
           if [ "$STATUS_CODE" != "200" ]; then
             echo "Databricks token validation failed with HTTP $STATUS_CODE" >&2
-            cat /tmp/dbx_me.json >&2
+            cat "$DBX_ERROR_BODY" >&2
             exit 1
           fi
 
