@@ -1,0 +1,21 @@
+request_id: RITMDEVSA0001
+platform: databricks
+request_type: service_account
+environment: Development
+activity_type: create
+service_account_type: Business
+service_account_name: SERV_DATA_FINANCE_PBI_DEV
+attached_to_ad_group: false
+service_account_owner: Data Platform Team
+cluster_name: FINANCE_ANALYTICS_DEV
+subscription: DMT DEV
+resource_group_name: RG-FINANCE-DEV
+workspace_name: DATABRICKS-DEV
+cluster_type: Shared
+cluster_owner: Data Platform Team
+cluster_scoa_department_name: Finance
+cluster_scoa_department_number: "123456"
+department_scoa_number: "123456"
+department_scoa_name: Finance
+justification: DEV validation for service account workflow
+additional_information: Sample DDD-DBX-01 request for workflow_dispatch

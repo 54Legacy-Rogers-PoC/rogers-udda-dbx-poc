@@ -1,6 +1,7 @@
 # Rogers UDA Databricks Object Access POC
 
 This repository implements DDD-DBX-02: Databricks Object Access Management for the Unified Data Access (UDA) framework.
+It also includes a DDD-DBX-01 service-account request processing scaffold for governance metadata processing.
 
 Approved requests are converted into Request-as-Code artifacts and executed by GitHub Actions and Terraform against Databricks.
 
@@ -19,6 +20,7 @@ Approved requests are converted into Request-as-Code artifacts and executed by G
 .github/
 	workflows/
 		uda-dbx-object-access.yml
+		uda-dbx-service-account.yml
 terraform/
 	providers.tf
 	variables.tf
@@ -29,6 +31,7 @@ uda/
 		object-access/
 	requests/
 		object-access/
+		service-account/
 	scripts/
 	config/
 	templates/
@@ -94,6 +97,30 @@ Stages:
 4. Terraform init/validate/plan
 5. Terraform apply (conditional + approval environment)
 6. Notification and logging summary
+
+## Service Account Workflow (DDD-DBX-01 Scaffold)
+
+Workflow file: `.github/workflows/uda-dbx-service-account.yml`
+
+Sample request: `uda/requests/service-account/dev/RITMDEVSA0001.yaml`
+
+Parser script: `uda/scripts/process_service_account_request.py`
+
+Supported activity types:
+
+- `create`
+- `delete`
+- `add_to_ad_group`
+- `remove_from_ad_group`
+- `add_to_cluster`
+- `remove_from_cluster`
+- `change_ownership`
+
+Current behavior:
+
+- Metadata-only activities are processed and governance payload artifacts are generated.
+- Cluster access activities are detected as Terraform-required and the workflow fails intentionally with a clear "not implemented" message.
+- This prevents false-positive provisioning success until service-account Terraform resources are added.
 
 ## Azure Key Vault Secrets
 
