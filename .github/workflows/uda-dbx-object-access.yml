@@ -220,6 +220,20 @@ jobs:
             --request-file "$REQUEST_FILE" \
             --attachments-dir "$ATTACHMENTS_DIR"
 
+      - name: Determine request activity
+        shell: bash
+        run: |
+          REQUEST_ACTIVITY="$(python - <<'PY'
+          import os
+          import yaml
+          from pathlib import Path
+          req = Path(os.environ["REQUEST_FILE"])
+          payload = yaml.safe_load(req.read_text(encoding="utf-8")) or {}
+          print(str(payload.get("activity_type", "")).strip().upper())
+          PY
+          )"
+          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
+
       - name: Validate object access template
         run: |
           python uda/scripts/object-access/validate_template.py \
@@ -401,11 +415,66 @@ jobs:
         run: terraform -chdir=terraform validate
 
       - name: Terraform plan
+        shell: bash
         run: |
-          terraform -chdir=terraform plan \
-            -lock-timeout=10m \
-            -var-file="../$TFVARS_JSON" \
-            -out="../$TFPLAN_BIN"
+          if [ "$REQUEST_ACTIVITY" = "REVOKE" ]; then
+            echo "Building REVOKE target list from parsed records..."
+            mapfile -t TARGETS < <(python - <<'PY'
+            import json
+            import os
+            from pathlib import Path
+
+            tfvars = Path(os.environ["TFVARS_JSON"])
+            payload = json.loads(tfvars.read_text(encoding="utf-8"))
+            for r in payload.get("object_access_records", []):
+                activity = str(r.get("activity", "")).strip().upper()
+                if activity not in {"REMOVE", "REVOKE"}:
+                    continue
+
+                env = str(r.get("environment", "")).strip().upper()
+                access_for = str(r.get("access_for", "")).strip().lower()
+                principal = str(r.get("principal_name", "")).strip().lower()
+                object_type = str(r.get("object_type", "")).strip().upper()
+                catalog = str(r.get("catalog", "")).strip()
+                schema = str(r.get("schema", "")).strip()
+                object_name = str(r.get("object_name", "")).strip()
+                privilege = str(r.get("privilege", "")).strip().upper()
+
+                if object_type == "CATALOG":
+                    key = f"{env}|{access_for}|{principal}|CATALOG|{catalog}|{privilege}"
+                    print(f'module.object_access.databricks_grant.catalog_add["{key}"]')
+                elif object_type == "SCHEMA":
+                    key = f"{env}|{access_for}|{principal}|SCHEMA|{catalog}|{schema}|{privilege}"
+                    print(f'module.object_access.databricks_grant.schema_add["{key}"]')
+                elif object_type == "VIEW":
+                    key = f"{env}|{access_for}|{principal}|VIEW|{catalog}|{schema}|{object_name}|{privilege}"
+                    print(f'module.object_access.databricks_grant.view_add["{key}"]')
+            PY
+            )
+
+            if [ "${#TARGETS[@]}" -eq 0 ]; then
+              echo "No revoke targets found for REVOKE request." >&2
+              exit 1
+            fi
+
+            target_args=()
+            for t in "${TARGETS[@]}"; do
+              echo "Revoke target: $t"
+              target_args+=("-target=$t")
+            done
+
+            terraform -chdir=terraform plan \
+              -lock-timeout=10m \
+              -destroy \
+              -var-file="../$TFVARS_JSON" \
+              "${target_args[@]}" \
+              -out="../$TFPLAN_BIN"
+          else
+            terraform -chdir=terraform plan \
+              -lock-timeout=10m \
+              -var-file="../$TFVARS_JSON" \
+              -out="../$TFPLAN_BIN"
+          fi
           terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
 
       - name: Publish plan outputs
@@ -465,6 +534,20 @@ jobs:
         with:
           name: uda-dbx-object-access-plan-output-${{ steps.prep_paths.outputs.request_id }}
           path: ${{ steps.prep_paths.outputs.output_dir }}
+
+      - name: Determine request activity
+        shell: bash
+        run: |
+          REQUEST_ACTIVITY="$(python - <<'PY'
+          import os
+          import yaml
+          from pathlib import Path
+          req = Path(os.environ["REQUEST_FILE"])
+          payload = yaml.safe_load(req.read_text(encoding="utf-8")) or {}
+          print(str(payload.get("activity_type", "")).strip().upper())
+          PY
+          )"
+          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
 
       - name: Azure login
         uses: azure/login@v2
@@ -625,4 +708,10 @@ jobs:
           exit 1
 
       - name: Terraform apply
-        run: terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+        shell: bash
+        run: |
+          if [ "$REQUEST_ACTIVITY" = "REVOKE" ]; then
+            terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+          else
+            terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+          fi

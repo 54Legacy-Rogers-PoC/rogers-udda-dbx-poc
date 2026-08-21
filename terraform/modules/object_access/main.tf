@@ -53,7 +53,7 @@ locals {
 
   schema_add_record_map = {
     for r in local.add_schema_records :
-    format("%s-%d", r.record_id, r.row_number) => r
+    format("%s|%s|%s|SCHEMA|%s|%s|%s", r.environment, r.access_for, lower(r.principal_name), r.catalog, r.schema, r.privilege) => r
   }
   schema_remove_record_map = {
     for r in local.remove_schema_records :
@@ -62,7 +62,7 @@ locals {
 
   view_add_record_map = {
     for r in local.add_view_records :
-    format("%s-%d", r.record_id, r.row_number) => r
+    format("%s|%s|%s|VIEW|%s|%s|%s|%s", r.environment, r.access_for, lower(r.principal_name), r.catalog, r.schema, r.object_name, r.privilege) => r
   }
   view_remove_record_map = {
     for r in local.remove_view_records :
@@ -71,7 +71,7 @@ locals {
 
   catalog_add_record_map = {
     for r in local.add_catalog_records :
-    format("%s-%d", r.record_id, r.row_number) => r
+    format("%s|%s|%s|CATALOG|%s|%s", r.environment, r.access_for, lower(r.principal_name), r.catalog, r.privilege) => r
   }
   catalog_remove_record_map = {
     for r in local.remove_catalog_records :
@@ -123,26 +123,3 @@ resource "databricks_grant" "view_add" {
   ]
 }
 
-resource "databricks_grant" "catalog_remove" {
-  for_each = local.catalog_remove_record_map
-
-  catalog   = each.value.catalog
-  principal = each.value.principal_name
-  privileges = []
-}
-
-resource "databricks_grant" "schema_remove" {
-  for_each = local.schema_remove_record_map
-
-  schema    = format("%s.%s", each.value.catalog, each.value.schema)
-  principal = each.value.principal_name
-  privileges = []
-}
-
-resource "databricks_grant" "view_remove" {
-  for_each = local.view_remove_record_map
-
-  table     = format("%s.%s.%s", each.value.catalog, each.value.schema, each.value.object_name)
-  principal = each.value.principal_name
-  privileges = []
-}
