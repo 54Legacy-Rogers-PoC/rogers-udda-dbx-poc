@@ -279,19 +279,59 @@ jobs:
           get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP TFSTATE-RESOURCE-GROUP-DBX-UDA
           get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
           get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
-          get_kv_secret TFSTATE_KEY_VALUE TFSTATE-KEY-DBX TFSTATE-KEY
+          get_kv_secret TFSTATE_KEY_PREFIX_VALUE TFSTATE-KEY-PREFIX TFSTATE-KEY-ROOT TFSTATE-KEY-DBX TFSTATE-KEY
           get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
 
-          TFSTATE_KEY_EFFECTIVE="$TFSTATE_KEY_VALUE"
-          if [ -n "${REQUEST_ID:-}" ]; then
-            if [[ "$TFSTATE_KEY_VALUE" == */* ]]; then
-              TFSTATE_KEY_EFFECTIVE="${TFSTATE_KEY_VALUE%/*}/$REQUEST_ID.tfstate"
-            else
-              TFSTATE_KEY_EFFECTIVE="$REQUEST_ID.tfstate"
-            fi
+          mapfile -t KEY_PARTS < <(python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          import yaml
+
+          request_file = Path(os.environ["REQUEST_FILE"])
+          payload = yaml.safe_load(request_file.read_text(encoding="utf-8")) or {}
+
+          env = str(payload.get("environment", "")).strip().lower()
+          access_for = str(payload.get("access_for", "")).strip().lower()
+
+          if access_for == "ad_group":
+              principal = str(payload.get("ad_group_name", "")).strip().lower()
+          elif access_for == "service_account":
+              principal = str(payload.get("service_account_name", "")).strip().lower()
+          else:
+              principal = str(payload.get("ad_group_name") or payload.get("service_account_name") or "").strip().lower()
+
+          def normalize(value: str) -> str:
+              normalized = re.sub(r"[^a-z0-9]+", "_", value).strip("_")
+              return normalized or "unknown"
+
+          print(normalize(env))
+          print(normalize(access_for))
+          print(normalize(principal))
+          PY
+          )
+
+          KEY_ENV="${KEY_PARTS[0]:-unknown}"
+          KEY_ACCESS_FOR="${KEY_PARTS[1]:-unknown}"
+          KEY_PRINCIPAL="${KEY_PARTS[2]:-unknown}"
+
+          if [ "$KEY_ENV" = "unknown" ] || [ "$KEY_ACCESS_FOR" = "unknown" ] || [ "$KEY_PRINCIPAL" = "unknown" ]; then
+            echo "Unable to derive backend key parts from request file: $REQUEST_FILE" >&2
+            exit 1
           fi
 
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_VALUE TFSTATE_ACCESS_KEY_VALUE; do
+          KEY_PREFIX="$TFSTATE_KEY_PREFIX_VALUE"
+          if [[ "$KEY_PREFIX" == *.tfstate ]]; then
+            KEY_PREFIX="${KEY_PREFIX%/*}"
+          fi
+          KEY_PREFIX="${KEY_PREFIX%/}"
+          if [ -z "$KEY_PREFIX" ]; then
+            KEY_PREFIX="databricks/object-access"
+          fi
+
+          TFSTATE_KEY_EFFECTIVE="$KEY_PREFIX/$KEY_ENV/$KEY_ACCESS_FOR/$KEY_PRINCIPAL.tfstate"
+
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_PREFIX_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
@@ -324,6 +364,8 @@ jobs:
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+
+          echo "Derived backend key: $TFSTATE_KEY_EFFECTIVE"
 
       - name: Terraform init (with retry)
         shell: bash
@@ -464,19 +506,59 @@ jobs:
           get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP TFSTATE-RESOURCE-GROUP-DBX-UDA
           get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
           get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
-          get_kv_secret TFSTATE_KEY_VALUE TFSTATE-KEY-DBX TFSTATE-KEY
+          get_kv_secret TFSTATE_KEY_PREFIX_VALUE TFSTATE-KEY-PREFIX TFSTATE-KEY-ROOT TFSTATE-KEY-DBX TFSTATE-KEY
           get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
 
-          TFSTATE_KEY_EFFECTIVE="$TFSTATE_KEY_VALUE"
-          if [ -n "${REQUEST_ID:-}" ]; then
-            if [[ "$TFSTATE_KEY_VALUE" == */* ]]; then
-              TFSTATE_KEY_EFFECTIVE="${TFSTATE_KEY_VALUE%/*}/$REQUEST_ID.tfstate"
-            else
-              TFSTATE_KEY_EFFECTIVE="$REQUEST_ID.tfstate"
-            fi
+          mapfile -t KEY_PARTS < <(python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          import yaml
+
+          request_file = Path(os.environ["REQUEST_FILE"])
+          payload = yaml.safe_load(request_file.read_text(encoding="utf-8")) or {}
+
+          env = str(payload.get("environment", "")).strip().lower()
+          access_for = str(payload.get("access_for", "")).strip().lower()
+
+          if access_for == "ad_group":
+              principal = str(payload.get("ad_group_name", "")).strip().lower()
+          elif access_for == "service_account":
+              principal = str(payload.get("service_account_name", "")).strip().lower()
+          else:
+              principal = str(payload.get("ad_group_name") or payload.get("service_account_name") or "").strip().lower()
+
+          def normalize(value: str) -> str:
+              normalized = re.sub(r"[^a-z0-9]+", "_", value).strip("_")
+              return normalized or "unknown"
+
+          print(normalize(env))
+          print(normalize(access_for))
+          print(normalize(principal))
+          PY
+          )
+
+          KEY_ENV="${KEY_PARTS[0]:-unknown}"
+          KEY_ACCESS_FOR="${KEY_PARTS[1]:-unknown}"
+          KEY_PRINCIPAL="${KEY_PARTS[2]:-unknown}"
+
+          if [ "$KEY_ENV" = "unknown" ] || [ "$KEY_ACCESS_FOR" = "unknown" ] || [ "$KEY_PRINCIPAL" = "unknown" ]; then
+            echo "Unable to derive backend key parts from request file: $REQUEST_FILE" >&2
+            exit 1
           fi
 
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_VALUE TFSTATE_ACCESS_KEY_VALUE; do
+          KEY_PREFIX="$TFSTATE_KEY_PREFIX_VALUE"
+          if [[ "$KEY_PREFIX" == *.tfstate ]]; then
+            KEY_PREFIX="${KEY_PREFIX%/*}"
+          fi
+          KEY_PREFIX="${KEY_PREFIX%/}"
+          if [ -z "$KEY_PREFIX" ]; then
+            KEY_PREFIX="databricks/object-access"
+          fi
+
+          TFSTATE_KEY_EFFECTIVE="$KEY_PREFIX/$KEY_ENV/$KEY_ACCESS_FOR/$KEY_PRINCIPAL.tfstate"
+
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_PREFIX_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
@@ -509,6 +591,8 @@ jobs:
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+
+          echo "Derived backend key: $TFSTATE_KEY_EFFECTIVE"
 
       - name: Terraform init (with retry)
         shell: bash

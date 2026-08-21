@@ -12,5 +12,5 @@ service_account_name: ""
 service_account_owner_name: ""
 service_account_owner_email: ""
 template_file: ObjectAccessTemplate3.xlsx
-justification: Finance analytcs rporn accs for quarerly closses
-additional_information: Approved EST request wih object access template attached
+justification: Finance analytcs rpon accs for quarerly closses
+additional_information: Approved EST reques wih object access template attached
