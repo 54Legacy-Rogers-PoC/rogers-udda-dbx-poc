@@ -30,7 +30,7 @@ REQUIRED_FIELDS = (
 	"justification",
 )
 ALLOWED_ENVIRONMENTS = {"DEV", "QA", "PRD"}
-ALLOWED_ACTIVITY_TYPES = {"ADD", "REMOVE"}
+ALLOWED_ACTIVITY_TYPES = {"ADD", "REMOVE", "REVOKE"}
 ALLOWED_ACCESS_FOR = {"ad_group", "service_account"}
 
 

@@ -51,7 +51,7 @@ HEADER_ALIASES = {
 	"Additional_Information": {"Additional_Information", "additional_information"},
 }
 
-ALLOWED_ACTIVITY = {"ADD", "REMOVE"}
+ALLOWED_ACTIVITY = {"ADD", "REMOVE", "REVOKE"}
 ALLOWED_ENV = {"DEV", "QA", "PRD"}
 ALLOWED_ACCESS_FOR = {"ad_group", "service_account"}
 ALLOWED_OBJECT_TYPES = {"CATALOG", "SCHEMA", "VIEW", "FOLDER"}
@@ -491,7 +491,10 @@ def _effective_activity(record: dict[str, Any], request_context: dict[str, str])
 	activity = _normalize(record.get("Activity"))
 	if activity == "":
 		activity = request_context.get("activity_type", "")
-	return activity.upper()
+	effective = activity.upper()
+	if effective == "REVOKE":
+		return "REMOVE"
+	return effective
 
 
 def _validate_add_prerequisites(records: list[dict[str, Any]], request_context: dict[str, str]) -> list[ValidationError]:

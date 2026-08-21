@@ -122,3 +122,27 @@ resource "databricks_grant" "view_add" {
     each.value.privilege
   ]
 }
+
+resource "databricks_grant" "catalog_remove" {
+  for_each = local.catalog_remove_record_map
+
+  catalog   = each.value.catalog
+  principal = each.value.principal_name
+  privileges = []
+}
+
+resource "databricks_grant" "schema_remove" {
+  for_each = local.schema_remove_record_map
+
+  schema    = format("%s.%s", each.value.catalog, each.value.schema)
+  principal = each.value.principal_name
+  privileges = []
+}
+
+resource "databricks_grant" "view_remove" {
+  for_each = local.view_remove_record_map
+
+  table     = format("%s.%s.%s", each.value.catalog, each.value.schema, each.value.object_name)
+  principal = each.value.principal_name
+  privileges = []
+}

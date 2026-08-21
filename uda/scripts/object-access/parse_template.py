@@ -151,6 +151,8 @@ def _normalize_row(row: dict[str, Any], request_context: dict[str, str]) -> dict
 	row_principal = _normalize(row.get("Principal_Name"))
 
 	activity = row_activity or request_context.get("activity_type", "")
+	if activity == "REVOKE":
+		activity = "REMOVE"
 	environment = row_environment or request_context.get("environment", "")
 	access_for = row_access_for or request_context.get("access_for", "")
 	principal_name = row_principal or request_context.get("principal_name", "")
