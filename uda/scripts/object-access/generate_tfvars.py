@@ -87,15 +87,9 @@ def build_tfvars_payload(parsed_payload: dict[str, Any]) -> dict[str, Any]:
 
 	environment = environments[0] if environments else _normalize(parsed_payload.get("environment")).upper()
 
-	activities = sorted({r["activity"] for r in terraform_records if r["activity"]})
-	access_types = sorted({r["access_for"] for r in terraform_records if r["access_for"]})
-
 	return {
 		"request_id": _normalize(parsed_payload.get("request_id")),
 		"environment": environment,
-		"record_count": len(terraform_records),
-		"activities": activities,
-		"access_for_types": access_types,
 		"object_access_records": terraform_records,
 	}
 
