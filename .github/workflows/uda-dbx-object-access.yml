@@ -26,6 +26,11 @@ on:
         required: true
         default: uda/requests/object-access/RITM123456.yaml
         type: string
+      request_files:
+        description: Optional comma or newline separated request YAML paths
+        required: false
+        default: ""
+        type: string
       attachments_dir:
         description: Directory containing uploaded template attachments
         required: true
@@ -72,16 +77,37 @@ jobs:
         shell: bash
         env:
           REQUEST_FILE_INPUT: ${{ inputs.request_file }}
+          REQUEST_FILES_INPUT: ${{ inputs.request_files }}
         run: |
           set -euo pipefail
 
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             request_file="${REQUEST_FILE_INPUT:-uda/requests/object-access/RITM123456.yaml}"
-            if [ ! -f "$request_file" ]; then
-              echo "Requested file not found: $request_file" >&2
+            request_files_raw="${REQUEST_FILES_INPUT:-}"
+
+            if [ -n "$request_files_raw" ]; then
+              mapfile -t requested_files < <(printf '%s\n' "$request_files_raw" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | awk '!seen[$0]++')
+            else
+              requested_files=("$request_file")
+            fi
+
+            if [ "${#requested_files[@]}" -eq 0 ]; then
+              echo "No request files were provided for workflow_dispatch." >&2
               exit 1
             fi
-            matrix_json="{\"include\":[{\"request_file\":\"$request_file\"}]}"
+
+            missing=0
+            for f in "${requested_files[@]}"; do
+              if [ ! -f "$f" ]; then
+                echo "Requested file not found: $f" >&2
+                missing=1
+              fi
+            done
+            if [ "$missing" -ne 0 ]; then
+              exit 1
+            fi
+
+            matrix_json="$(python -c "import json,sys; print(json.dumps({'include':[{'request_file':f} for f in sys.argv[1:] if f]}))" "${requested_files[@]}")"
             echo "has_requests=true" >> "$GITHUB_OUTPUT"
             echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
             exit 0
@@ -343,7 +369,7 @@ jobs:
 
   apply-object-access:
     needs: [detect-requests, plan-object-access]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply && needs.detect-requests.outputs.has_requests == 'true' }}
+    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply)) }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
