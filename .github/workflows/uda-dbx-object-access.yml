@@ -206,12 +206,30 @@ jobs:
         run: |
           STATUS_CODE="$(curl -sS -o /tmp/dbx_me.json -w "%{http_code}" \
             -H "Authorization: Bearer $DATABRICKS_TOKEN" \
-            "$DATABRICKS_HOST/api/2.0/current-user/me")"
+            "$DATABRICKS_HOST/api/2.0/preview/scim/v2/Me")"
 
           if [ "$STATUS_CODE" = "404" ]; then
-            echo "Databricks token validation returned HTTP 404 on $DATABRICKS_HOST/api/2.0/current-user/me" >&2
-            echo "This usually means DATABRICKS-HOST is not a workspace endpoint." >&2
-            echo "Set DATABRICKS-HOST to the workspace URL only (for example https://adb-<workspace-id>.<region>.azuredatabricks.net)." >&2
+            echo "Databricks token validation returned HTTP 404 on SCIM Me endpoint." >&2
+            echo "Trying fallback endpoint /api/2.0/clusters/list..." >&2
+            STATUS_CODE="$(curl -sS -o /tmp/dbx_me_fallback.json -w "%{http_code}" \
+              -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+              "$DATABRICKS_HOST/api/2.0/clusters/list")"
+            if [ "$STATUS_CODE" = "404" ]; then
+              echo "Fallback endpoint also returned 404. DATABRICKS-HOST may be incorrect for workspace APIs." >&2
+              echo "Use workspace URL only (for example https://adb-<workspace-id>.<region>.azuredatabricks.net)." >&2
+              cat /tmp/dbx_me_fallback.json >&2
+              exit 1
+            fi
+          fi
+
+          if [ "$STATUS_CODE" = "401" ]; then
+            echo "Databricks token validation failed with HTTP 401 (invalid/expired token)." >&2
+            cat /tmp/dbx_me.json >&2
+            exit 1
+          fi
+
+          if [ "$STATUS_CODE" = "403" ]; then
+            echo "Databricks token is valid but does not have required permissions (HTTP 403)." >&2
             cat /tmp/dbx_me.json >&2
             exit 1
           fi
@@ -341,12 +359,30 @@ jobs:
         run: |
           STATUS_CODE="$(curl -sS -o /tmp/dbx_me.json -w "%{http_code}" \
             -H "Authorization: Bearer $DATABRICKS_TOKEN" \
-            "$DATABRICKS_HOST/api/2.0/current-user/me")"
+            "$DATABRICKS_HOST/api/2.0/preview/scim/v2/Me")"
 
           if [ "$STATUS_CODE" = "404" ]; then
-            echo "Databricks token validation returned HTTP 404 on $DATABRICKS_HOST/api/2.0/current-user/me" >&2
-            echo "This usually means DATABRICKS-HOST is not a workspace endpoint." >&2
-            echo "Set DATABRICKS-HOST to the workspace URL only (for example https://adb-<workspace-id>.<region>.azuredatabricks.net)." >&2
+            echo "Databricks token validation returned HTTP 404 on SCIM Me endpoint." >&2
+            echo "Trying fallback endpoint /api/2.0/clusters/list..." >&2
+            STATUS_CODE="$(curl -sS -o /tmp/dbx_me_fallback.json -w "%{http_code}" \
+              -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+              "$DATABRICKS_HOST/api/2.0/clusters/list")"
+            if [ "$STATUS_CODE" = "404" ]; then
+              echo "Fallback endpoint also returned 404. DATABRICKS-HOST may be incorrect for workspace APIs." >&2
+              echo "Use workspace URL only (for example https://adb-<workspace-id>.<region>.azuredatabricks.net)." >&2
+              cat /tmp/dbx_me_fallback.json >&2
+              exit 1
+            fi
+          fi
+
+          if [ "$STATUS_CODE" = "401" ]; then
+            echo "Databricks token validation failed with HTTP 401 (invalid/expired token)." >&2
+            cat /tmp/dbx_me.json >&2
+            exit 1
+          fi
+
+          if [ "$STATUS_CODE" = "403" ]; then
+            echo "Databricks token is valid but does not have required permissions (HTTP 403)." >&2
             cat /tmp/dbx_me.json >&2
             exit 1
           fi
