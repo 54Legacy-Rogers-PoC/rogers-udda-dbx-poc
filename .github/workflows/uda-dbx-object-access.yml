@@ -142,6 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix: ${{ fromJson(needs.detect-requests.outputs.matrix) }}
     env:
       REQUEST_FILE: ${{ matrix.request_file }}
@@ -344,6 +345,7 @@ jobs:
       - name: Terraform plan
         run: |
           terraform -chdir=terraform plan \
+            -lock-timeout=10m \
             -var-file="../$TFVARS_JSON" \
             -out="../$TFPLAN_BIN"
           terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
@@ -373,6 +375,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix: ${{ fromJson(needs.detect-requests.outputs.matrix) }}
     environment: prod
     env:
@@ -513,4 +516,4 @@ jobs:
           exit 1
 
       - name: Terraform apply
-        run: terraform -chdir=terraform apply -auto-approve "../$TFPLAN_BIN"
+        run: terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
