@@ -172,7 +172,8 @@ jobs:
         shell: bash
         run: |
           KV="${{ secrets.KEYVAULT_NAME }}"
-          DATABRICKS_HOST_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r' | sed 's#/$##')"
+          DATABRICKS_HOST_RAW="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r')"
+          DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
           DATABRICKS_TOKEN_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-TOKEN --query value -o tsv | tr -d '\r')"
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_TOKEN_VALUE; do
@@ -293,7 +294,8 @@ jobs:
         shell: bash
         run: |
           KV="${{ secrets.KEYVAULT_NAME }}"
-          DATABRICKS_HOST_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r' | sed 's#/$##')"
+          DATABRICKS_HOST_RAW="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r')"
+          DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
           DATABRICKS_TOKEN_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-TOKEN --query value -o tsv | tr -d '\r')"
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_TOKEN_VALUE; do
