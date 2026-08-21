@@ -19,9 +19,9 @@ on:
     paths:
       - "uda/requests/object-access/**"
       - "uda/attachments/object-access/**"
-      - "uda/scripts/**"
-      - "uda/config/**"
-      - "terraform/**"
+      - "uda/templates/ObjectAccessTemplate.columns.md"
+      - "uda/scripts/process_request.py"
+      - "uda/config/environments.yaml"
       - ".github/workflows/uda-dbx-object-access.yml"
 
 permissions:
