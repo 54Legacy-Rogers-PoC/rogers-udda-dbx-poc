@@ -419,41 +419,7 @@ jobs:
         run: |
           if [ "$REQUEST_ACTIVITY" = "REVOKE" ]; then
             echo "Building REVOKE target list from parsed records..."
-            target_file="$(mktemp)"
-            python - > "$target_file" <<'PY'
-            import json
-            import os
-            from pathlib import Path
-
-            tfvars = Path(os.environ["TFVARS_JSON"])
-            payload = json.loads(tfvars.read_text(encoding="utf-8"))
-
-            for r in payload.get("object_access_records", []):
-                activity = str(r.get("activity", "")).strip().upper()
-                if activity not in {"REMOVE", "REVOKE"}:
-                    continue
-
-                env = str(r.get("environment", "")).strip().upper()
-                access_for = str(r.get("access_for", "")).strip().lower()
-                principal = str(r.get("principal_name", "")).strip().lower()
-                object_type = str(r.get("object_type", "")).strip().upper()
-                catalog = str(r.get("catalog", "")).strip()
-                schema = str(r.get("schema", "")).strip()
-                object_name = str(r.get("object_name", "")).strip()
-                privilege = str(r.get("privilege", "")).strip().upper()
-
-                if object_type == "CATALOG":
-                    key = f"{env}|{access_for}|{principal}|CATALOG|{catalog}|{privilege}"
-                    print(f'module.object_access.databricks_grant.catalog_add["{key}"]')
-                elif object_type == "SCHEMA":
-                    key = f"{env}|{access_for}|{principal}|SCHEMA|{catalog}|{schema}|{privilege}"
-                    print(f'module.object_access.databricks_grant.schema_add["{key}"]')
-                elif object_type == "VIEW":
-                    key = f"{env}|{access_for}|{principal}|VIEW|{catalog}|{schema}|{object_name}|{privilege}"
-                    print(f'module.object_access.databricks_grant.view_add["{key}"]')
-            PY
-
-            mapfile -t TARGETS < "$target_file"
+            mapfile -t TARGETS < <(jq -r '.object_access_records[] | select((.activity | ascii_upcase) == "REMOVE" or (.activity | ascii_upcase) == "REVOKE") | if ((.object_type | ascii_upcase) == "CATALOG") then "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]" elif ((.object_type | ascii_upcase) == "SCHEMA") then "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]" elif ((.object_type | ascii_upcase) == "VIEW") then "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]" else empty end' "$TFVARS_JSON")
 
             if [ "${#TARGETS[@]}" -eq 0 ]; then
               echo "No revoke targets found for REVOKE request." >&2
