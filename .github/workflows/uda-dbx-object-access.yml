@@ -222,8 +222,21 @@ jobs:
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
-      - name: Terraform init
-        run: terraform -chdir=terraform init
+      - name: Terraform init (with retry)
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            echo "Terraform init attempt $attempt/3"
+            if terraform -chdir=terraform init; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "terraform init failed (transient?). Retrying in 15s..."
+              sleep 15
+            fi
+          done
+          echo "terraform init failed after 3 attempts" >&2
+          exit 1
 
       - name: Terraform validate
         run: terraform -chdir=terraform validate
@@ -334,8 +347,21 @@ jobs:
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
-      - name: Terraform init
-        run: terraform -chdir=terraform init
+      - name: Terraform init (with retry)
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            echo "Terraform init attempt $attempt/3"
+            if terraform -chdir=terraform init; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "terraform init failed (transient?). Retrying in 15s..."
+              sleep 15
+            fi
+          done
+          echo "terraform init failed after 3 attempts" >&2
+          exit 1
 
       - name: Terraform apply
         run: terraform -chdir=terraform apply -auto-approve "../$TFPLAN_BIN"
