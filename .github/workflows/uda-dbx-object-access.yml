@@ -172,8 +172,8 @@ jobs:
         shell: bash
         run: |
           KV="${{ secrets.KEYVAULT_NAME }}"
-          DATABRICKS_HOST_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv)"
-          DATABRICKS_TOKEN_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-TOKEN --query value -o tsv)"
+          DATABRICKS_HOST_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r' | sed 's#/$##')"
+          DATABRICKS_TOKEN_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-TOKEN --query value -o tsv | tr -d '\r')"
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_TOKEN_VALUE; do
             if [ -z "${!v}" ]; then
@@ -182,11 +182,54 @@ jobs:
             fi
           done
 
+          if [[ "$DATABRICKS_HOST_VALUE" != https://* ]]; then
+            echo "DATABRICKS-HOST must start with https://. Current value appears invalid." >&2
+            exit 1
+          fi
+
+          echo "::add-mask::$DATABRICKS_TOKEN_VALUE"
+
           echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_token=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
 
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_TOKEN=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
+
+      - name: Validate Databricks token
+        shell: bash
+        run: |
+          STATUS_CODE="$(curl -sS -o /tmp/dbx_me.json -w "%{http_code}" \
+            -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+            "$DATABRICKS_HOST/api/2.0/current-user/me")"
+
+          if [ "$STATUS_CODE" != "200" ]; then
+            echo "Databricks token validation failed with HTTP $STATUS_CODE" >&2
+            cat /tmp/dbx_me.json >&2
+            exit 1
+          fi
+
+          echo "Databricks token validated successfully."
+
+      - name: Validate Unity Catalog API access
+        shell: bash
+        run: |
+          STATUS_CODE="$(curl -sS -o /tmp/dbx_uc.json -w "%{http_code}" \
+            -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+            "$DATABRICKS_HOST/api/2.1/unity-catalog/current-metastore")"
+
+          if [ "$STATUS_CODE" = "401" ]; then
+            echo "Unity Catalog API returned 401. Token is not valid for this workspace host." >&2
+            cat /tmp/dbx_uc.json >&2
+            exit 1
+          fi
+
+          if [ "$STATUS_CODE" = "403" ]; then
+            echo "Unity Catalog API returned 403. Token is valid but lacks required Unity Catalog permissions." >&2
+            cat /tmp/dbx_uc.json >&2
+            exit 1
+          fi
+
+          echo "Unity Catalog API check returned HTTP $STATUS_CODE."
 
       - name: Terraform init
         run: terraform -chdir=terraform init
@@ -250,8 +293,8 @@ jobs:
         shell: bash
         run: |
           KV="${{ secrets.KEYVAULT_NAME }}"
-          DATABRICKS_HOST_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv)"
-          DATABRICKS_TOKEN_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-TOKEN --query value -o tsv)"
+          DATABRICKS_HOST_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r' | sed 's#/$##')"
+          DATABRICKS_TOKEN_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-TOKEN --query value -o tsv | tr -d '\r')"
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_TOKEN_VALUE; do
             if [ -z "${!v}" ]; then
@@ -260,11 +303,54 @@ jobs:
             fi
           done
 
+          if [[ "$DATABRICKS_HOST_VALUE" != https://* ]]; then
+            echo "DATABRICKS-HOST must start with https://. Current value appears invalid." >&2
+            exit 1
+          fi
+
+          echo "::add-mask::$DATABRICKS_TOKEN_VALUE"
+
           echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_token=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
 
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_TOKEN=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
+
+      - name: Validate Databricks token
+        shell: bash
+        run: |
+          STATUS_CODE="$(curl -sS -o /tmp/dbx_me.json -w "%{http_code}" \
+            -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+            "$DATABRICKS_HOST/api/2.0/current-user/me")"
+
+          if [ "$STATUS_CODE" != "200" ]; then
+            echo "Databricks token validation failed with HTTP $STATUS_CODE" >&2
+            cat /tmp/dbx_me.json >&2
+            exit 1
+          fi
+
+          echo "Databricks token validated successfully."
+
+      - name: Validate Unity Catalog API access
+        shell: bash
+        run: |
+          STATUS_CODE="$(curl -sS -o /tmp/dbx_uc.json -w "%{http_code}" \
+            -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+            "$DATABRICKS_HOST/api/2.1/unity-catalog/current-metastore")"
+
+          if [ "$STATUS_CODE" = "401" ]; then
+            echo "Unity Catalog API returned 401. Token is not valid for this workspace host." >&2
+            cat /tmp/dbx_uc.json >&2
+            exit 1
+          fi
+
+          if [ "$STATUS_CODE" = "403" ]; then
+            echo "Unity Catalog API returned 403. Token is valid but lacks required Unity Catalog permissions." >&2
+            cat /tmp/dbx_uc.json >&2
+            exit 1
+          fi
+
+          echo "Unity Catalog API check returned HTTP $STATUS_CODE."
 
       - name: Terraform init
         run: terraform -chdir=terraform init
