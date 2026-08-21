@@ -284,14 +284,23 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             echo "Terraform init attempt $attempt/3"
+            init_log="$(mktemp)"
             if terraform -chdir=terraform init \
               -backend-config="resource_group_name=$TF_BACKEND_RESOURCE_GROUP_NAME" \
               -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
               -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
               -backend-config="key=$TF_BACKEND_KEY" \
-              -backend-config="use_azuread_auth=true"; then
+              -backend-config="use_azuread_auth=true" 2>&1 | tee "$init_log"; then
               exit 0
             fi
+
+            if grep -qi "AuthorizationPermissionMismatch" "$init_log" || grep -qi "unexpected status 403" "$init_log"; then
+              echo "Terraform backend authorization failed (403)." >&2
+              echo "Grant the GitHub service principal Storage Blob Data Contributor on the state container or storage account, then rerun." >&2
+              echo "Backend target: account=$TF_BACKEND_STORAGE_ACCOUNT_NAME container=$TF_BACKEND_CONTAINER_NAME key=$TF_BACKEND_KEY" >&2
+              exit 1
+            fi
+
             if [ "$attempt" -lt 3 ]; then
               echo "terraform init failed (transient?). Retrying in 15s..."
               sleep 15
@@ -446,14 +455,23 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             echo "Terraform init attempt $attempt/3"
+            init_log="$(mktemp)"
             if terraform -chdir=terraform init \
               -backend-config="resource_group_name=$TF_BACKEND_RESOURCE_GROUP_NAME" \
               -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
               -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
               -backend-config="key=$TF_BACKEND_KEY" \
-              -backend-config="use_azuread_auth=true"; then
+              -backend-config="use_azuread_auth=true" 2>&1 | tee "$init_log"; then
               exit 0
             fi
+
+            if grep -qi "AuthorizationPermissionMismatch" "$init_log" || grep -qi "unexpected status 403" "$init_log"; then
+              echo "Terraform backend authorization failed (403)." >&2
+              echo "Grant the GitHub service principal Storage Blob Data Contributor on the state container or storage account, then rerun." >&2
+              echo "Backend target: account=$TF_BACKEND_STORAGE_ACCOUNT_NAME container=$TF_BACKEND_CONTAINER_NAME key=$TF_BACKEND_KEY" >&2
+              exit 1
+            fi
+
             if [ "$attempt" -lt 3 ]; then
               echo "terraform init failed (transient?). Retrying in 15s..."
               sleep 15
