@@ -419,13 +419,15 @@ jobs:
         run: |
           if [ "$REQUEST_ACTIVITY" = "REVOKE" ]; then
             echo "Building REVOKE target list from parsed records..."
-            mapfile -t TARGETS < <(python - <<'PY'
+            target_file="$(mktemp)"
+            python - > "$target_file" <<'PY'
             import json
             import os
             from pathlib import Path
 
             tfvars = Path(os.environ["TFVARS_JSON"])
             payload = json.loads(tfvars.read_text(encoding="utf-8"))
+
             for r in payload.get("object_access_records", []):
                 activity = str(r.get("activity", "")).strip().upper()
                 if activity not in {"REMOVE", "REVOKE"}:
@@ -450,7 +452,8 @@ jobs:
                     key = f"{env}|{access_for}|{principal}|VIEW|{catalog}|{schema}|{object_name}|{privilege}"
                     print(f'module.object_access.databricks_grant.view_add["{key}"]')
             PY
-            )
+
+            mapfile -t TARGETS < "$target_file"
 
             if [ "${#TARGETS[@]}" -eq 0 ]; then
               echo "No revoke targets found for REVOKE request." >&2
