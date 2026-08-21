@@ -189,7 +189,7 @@ jobs:
             exit 1
           }
 
-          DATABRICKS_HOST_RAW="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r')"
+          get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST DB-HOST
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
           get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID DATABRICKS-CLIENT-ID
           get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET DATABRICKS-CLIENT-SECRET
@@ -303,7 +303,7 @@ jobs:
             exit 1
           }
 
-          DATABRICKS_HOST_RAW="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r')"
+          get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST DB-HOST
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
           get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID DATABRICKS-CLIENT-ID
           get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET DATABRICKS-CLIENT-SECRET
