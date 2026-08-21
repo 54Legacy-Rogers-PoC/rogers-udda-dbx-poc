@@ -174,9 +174,11 @@ jobs:
           KV="${{ secrets.KEYVAULT_NAME }}"
           DATABRICKS_HOST_RAW="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r')"
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
-          DATABRICKS_TOKEN_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-TOKEN --query value -o tsv | tr -d '\r')"
+          DATABRICKS_CLIENT_ID_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-ID --query value -o tsv | tr -d '\r')"
+          DATABRICKS_CLIENT_SECRET_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-SECRET --query value -o tsv | tr -d '\r')"
+          DATABRICKS_TENANT_ID_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-TENANT-ID --query value -o tsv | tr -d '\r')"
 
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_TOKEN_VALUE; do
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
@@ -193,87 +195,17 @@ jobs:
             exit 1
           fi
 
-          echo "::add-mask::$DATABRICKS_TOKEN_VALUE"
+          echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
 
           echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_token=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_tenant_id=$DATABRICKS_TENANT_ID_VALUE" >> "$GITHUB_ENV"
 
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
-          echo "DATABRICKS_TOKEN=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
-
-      - name: Validate Databricks token
-        shell: bash
-        run: |
-          DBX_ERROR_BODY=""
-          STATUS_CODE="$(curl -sS -o /tmp/dbx_me.json -w "%{http_code}" \
-            -H "Authorization: Bearer $DATABRICKS_TOKEN" \
-            "$DATABRICKS_HOST/api/2.0/preview/scim/v2/Me")"
-
-          if [ "$STATUS_CODE" = "404" ]; then
-            echo "Databricks token validation returned HTTP 404 on SCIM Me endpoint." >&2
-            echo "Trying fallback endpoint /api/2.0/clusters/list..." >&2
-            STATUS_CODE="$(curl -sS -o /tmp/dbx_me_fallback.json -w "%{http_code}" \
-              -H "Authorization: Bearer $DATABRICKS_TOKEN" \
-              "$DATABRICKS_HOST/api/2.0/clusters/list")"
-            DBX_ERROR_BODY="/tmp/dbx_me_fallback.json"
-            if [ "$STATUS_CODE" = "404" ]; then
-              echo "Fallback endpoint also returned 404. DATABRICKS-HOST may be incorrect for workspace APIs." >&2
-              echo "Use workspace URL only (for example https://adb-<workspace-id>.<region>.azuredatabricks.net)." >&2
-              cat /tmp/dbx_me_fallback.json >&2
-              exit 1
-            fi
-          else
-            DBX_ERROR_BODY="/tmp/dbx_me.json"
-          fi
-
-          if [ "$STATUS_CODE" = "401" ] || [ "$STATUS_CODE" = "403" ]; then
-            if grep -qi "Invalid access token" "$DBX_ERROR_BODY"; then
-              echo "Databricks rejected the token (invalid/expired/revoked or wrong workspace host)." >&2
-              cat "$DBX_ERROR_BODY" >&2
-              exit 1
-            fi
-          fi
-
-          if [ "$STATUS_CODE" = "401" ]; then
-            echo "Databricks token validation failed with HTTP 401 (invalid/expired token)." >&2
-            cat "$DBX_ERROR_BODY" >&2
-            exit 1
-          fi
-
-          if [ "$STATUS_CODE" = "403" ]; then
-            echo "Databricks token is valid but does not have required permissions (HTTP 403)." >&2
-            cat "$DBX_ERROR_BODY" >&2
-            exit 1
-          fi
-
-          if [ "$STATUS_CODE" != "200" ]; then
-            echo "Databricks token validation failed with HTTP $STATUS_CODE" >&2
-            cat "$DBX_ERROR_BODY" >&2
-            exit 1
-          fi
-
-          echo "Databricks token validated successfully."
-
-      - name: Validate Unity Catalog API access
-        shell: bash
-        run: |
-          STATUS_CODE="$(curl -sS -o /tmp/dbx_uc.json -w "%{http_code}" \
-            -H "Authorization: Bearer $DATABRICKS_TOKEN" \
-            "$DATABRICKS_HOST/api/2.1/unity-catalog/current-metastore")"
-
-          if [ "$STATUS_CODE" = "401" ]; then
-            echo "Unity Catalog API returned 401. Token is not valid for this workspace host." >&2
-            cat /tmp/dbx_uc.json >&2
-            exit 1
-          fi
-
-          if [ "$STATUS_CODE" = "403" ]; then
-            echo "Unity Catalog API returned 403. Token is valid but lacks required Unity Catalog permissions." >&2
-            cat /tmp/dbx_uc.json >&2
-            exit 1
-          fi
-
-          echo "Unity Catalog API check returned HTTP $STATUS_CODE."
+          echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_AZURE_TENANT_ID=$DATABRICKS_TENANT_ID_VALUE" >> "$GITHUB_ENV"
 
       - name: Terraform init
         run: terraform -chdir=terraform init
@@ -339,9 +271,11 @@ jobs:
           KV="${{ secrets.KEYVAULT_NAME }}"
           DATABRICKS_HOST_RAW="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r')"
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
-          DATABRICKS_TOKEN_VALUE="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-TOKEN --query value -o tsv | tr -d '\r')"
+          DATABRICKS_CLIENT_ID_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-ID --query value -o tsv | tr -d '\r')"
+          DATABRICKS_CLIENT_SECRET_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-SECRET --query value -o tsv | tr -d '\r')"
+          DATABRICKS_TENANT_ID_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-TENANT-ID --query value -o tsv | tr -d '\r')"
 
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_TOKEN_VALUE; do
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
@@ -358,87 +292,17 @@ jobs:
             exit 1
           fi
 
-          echo "::add-mask::$DATABRICKS_TOKEN_VALUE"
+          echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
 
           echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_token=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_tenant_id=$DATABRICKS_TENANT_ID_VALUE" >> "$GITHUB_ENV"
 
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
-          echo "DATABRICKS_TOKEN=$DATABRICKS_TOKEN_VALUE" >> "$GITHUB_ENV"
-
-      - name: Validate Databricks token
-        shell: bash
-        run: |
-          DBX_ERROR_BODY=""
-          STATUS_CODE="$(curl -sS -o /tmp/dbx_me.json -w "%{http_code}" \
-            -H "Authorization: Bearer $DATABRICKS_TOKEN" \
-            "$DATABRICKS_HOST/api/2.0/preview/scim/v2/Me")"
-
-          if [ "$STATUS_CODE" = "404" ]; then
-            echo "Databricks token validation returned HTTP 404 on SCIM Me endpoint." >&2
-            echo "Trying fallback endpoint /api/2.0/clusters/list..." >&2
-            STATUS_CODE="$(curl -sS -o /tmp/dbx_me_fallback.json -w "%{http_code}" \
-              -H "Authorization: Bearer $DATABRICKS_TOKEN" \
-              "$DATABRICKS_HOST/api/2.0/clusters/list")"
-            DBX_ERROR_BODY="/tmp/dbx_me_fallback.json"
-            if [ "$STATUS_CODE" = "404" ]; then
-              echo "Fallback endpoint also returned 404. DATABRICKS-HOST may be incorrect for workspace APIs." >&2
-              echo "Use workspace URL only (for example https://adb-<workspace-id>.<region>.azuredatabricks.net)." >&2
-              cat /tmp/dbx_me_fallback.json >&2
-              exit 1
-            fi
-          else
-            DBX_ERROR_BODY="/tmp/dbx_me.json"
-          fi
-
-          if [ "$STATUS_CODE" = "401" ] || [ "$STATUS_CODE" = "403" ]; then
-            if grep -qi "Invalid access token" "$DBX_ERROR_BODY"; then
-              echo "Databricks rejected the token (invalid/expired/revoked or wrong workspace host)." >&2
-              cat "$DBX_ERROR_BODY" >&2
-              exit 1
-            fi
-          fi
-
-          if [ "$STATUS_CODE" = "401" ]; then
-            echo "Databricks token validation failed with HTTP 401 (invalid/expired token)." >&2
-            cat "$DBX_ERROR_BODY" >&2
-            exit 1
-          fi
-
-          if [ "$STATUS_CODE" = "403" ]; then
-            echo "Databricks token is valid but does not have required permissions (HTTP 403)." >&2
-            cat "$DBX_ERROR_BODY" >&2
-            exit 1
-          fi
-
-          if [ "$STATUS_CODE" != "200" ]; then
-            echo "Databricks token validation failed with HTTP $STATUS_CODE" >&2
-            cat "$DBX_ERROR_BODY" >&2
-            exit 1
-          fi
-
-          echo "Databricks token validated successfully."
-
-      - name: Validate Unity Catalog API access
-        shell: bash
-        run: |
-          STATUS_CODE="$(curl -sS -o /tmp/dbx_uc.json -w "%{http_code}" \
-            -H "Authorization: Bearer $DATABRICKS_TOKEN" \
-            "$DATABRICKS_HOST/api/2.1/unity-catalog/current-metastore")"
-
-          if [ "$STATUS_CODE" = "401" ]; then
-            echo "Unity Catalog API returned 401. Token is not valid for this workspace host." >&2
-            cat /tmp/dbx_uc.json >&2
-            exit 1
-          fi
-
-          if [ "$STATUS_CODE" = "403" ]; then
-            echo "Unity Catalog API returned 403. Token is valid but lacks required Unity Catalog permissions." >&2
-            cat /tmp/dbx_uc.json >&2
-            exit 1
-          fi
-
-          echo "Unity Catalog API check returned HTTP $STATUS_CODE."
+          echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_AZURE_TENANT_ID=$DATABRICKS_TENANT_ID_VALUE" >> "$GITHUB_ENV"
 
       - name: Terraform init
         run: terraform -chdir=terraform init
