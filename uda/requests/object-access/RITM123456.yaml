@@ -2,7 +2,7 @@ request_id: RITM123456
 platform: databricks
 request_type: object_access
 environment: PRD
-activity_type: REVOKE
+activity_type: ADD
 access_for: ad_group
 ad_group_name: furqan@54legacy.com
 ad_group_description: Finance Analytics access group
