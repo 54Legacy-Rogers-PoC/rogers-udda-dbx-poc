@@ -172,11 +172,28 @@ jobs:
         shell: bash
         run: |
           KV="${{ secrets.KEYVAULT_NAME }}"
+
+          get_kv_secret() {
+            local out_var="$1"
+            shift
+            local names=("$@")
+            local value=""
+            for secret_name in "${names[@]}"; do
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r')"
+              if [ -n "$value" ]; then
+                printf -v "$out_var" '%s' "$value"
+                return 0
+              fi
+            done
+            echo "Missing Key Vault secret. Tried names: ${names[*]}" >&2
+            exit 1
+          }
+
           DATABRICKS_HOST_RAW="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r')"
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
-          DATABRICKS_CLIENT_ID_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-ID --query value -o tsv | tr -d '\r')"
-          DATABRICKS_CLIENT_SECRET_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-SECRET --query value -o tsv | tr -d '\r')"
-          DATABRICKS_TENANT_ID_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-TENANT-ID --query value -o tsv | tr -d '\r')"
+          get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID DATABRICKS-CLIENT-ID
+          get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET DATABRICKS-CLIENT-SECRET
+          get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID DATABRICKS-TENANT-ID
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE; do
             if [ -z "${!v}" ]; then
@@ -269,11 +286,28 @@ jobs:
         shell: bash
         run: |
           KV="${{ secrets.KEYVAULT_NAME }}"
+
+          get_kv_secret() {
+            local out_var="$1"
+            shift
+            local names=("$@")
+            local value=""
+            for secret_name in "${names[@]}"; do
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r')"
+              if [ -n "$value" ]; then
+                printf -v "$out_var" '%s' "$value"
+                return 0
+              fi
+            done
+            echo "Missing Key Vault secret. Tried names: ${names[*]}" >&2
+            exit 1
+          }
+
           DATABRICKS_HOST_RAW="$(az keyvault secret show --vault-name "$KV" --name DATABRICKS-HOST --query value -o tsv | tr -d '\r')"
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
-          DATABRICKS_CLIENT_ID_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-ID --query value -o tsv | tr -d '\r')"
-          DATABRICKS_CLIENT_SECRET_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-CLIENT-SECRET --query value -o tsv | tr -d '\r')"
-          DATABRICKS_TENANT_ID_VALUE="$(az keyvault secret show --vault-name "$KV" --name DB-TENANT-ID --query value -o tsv | tr -d '\r')"
+          get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID DATABRICKS-CLIENT-ID
+          get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET DATABRICKS-CLIENT-SECRET
+          get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID DATABRICKS-TENANT-ID
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE; do
             if [ -z "${!v}" ]; then
