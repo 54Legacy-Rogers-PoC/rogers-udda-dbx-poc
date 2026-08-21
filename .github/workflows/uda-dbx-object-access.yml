@@ -4,9 +4,21 @@ on:
   push:
     branches:
       - "**"
+    paths:
+      - "uda/requests/object-access/*.yaml"
+      - "uda/attachments/object-access/**"
+      - "uda/scripts/object-access/**"
+      - "terraform/**"
+      - ".github/workflows/uda-dbx-object-access.yml"
   pull_request:
     branches:
       - "**"
+    paths:
+      - "uda/requests/object-access/*.yaml"
+      - "uda/attachments/object-access/**"
+      - "uda/scripts/object-access/**"
+      - "terraform/**"
+      - ".github/workflows/uda-dbx-object-access.yml"
   workflow_dispatch:
     inputs:
       request_file:
@@ -43,12 +55,72 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate-object-access:
+  detect-requests:
     runs-on: ubuntu-latest
+    outputs:
+      has_requests: ${{ steps.collect.outputs.has_requests }}
+      matrix: ${{ steps.collect.outputs.matrix }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect request files
+        id: collect
+        shell: bash
+        env:
+          REQUEST_FILE_INPUT: ${{ inputs.request_file }}
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            request_file="${REQUEST_FILE_INPUT:-uda/requests/object-access/RITM123456.yaml}"
+            if [ ! -f "$request_file" ]; then
+              echo "Requested file not found: $request_file" >&2
+              exit 1
+            fi
+            matrix_json="{\"include\":[{\"request_file\":\"$request_file\"}]}"
+            echo "has_requests=true" >> "$GITHUB_OUTPUT"
+            echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.sha }}"
+          else
+            base_sha="${{ github.event.before }}"
+            head_sha="${{ github.sha }}"
+            if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
+              base_sha="$(git rev-parse HEAD~1)"
+            fi
+          fi
+
+          mapfile -t changed_files < <(git diff --name-only "$base_sha" "$head_sha" -- "uda/requests/object-access/*.yaml")
+
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            echo "has_requests=false" >> "$GITHUB_OUTPUT"
+            echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          matrix_json="$(python -c "import json,sys; print(json.dumps({'include':[{'request_file':f} for f in sys.argv[1:] if f]}))" "${changed_files[@]}")"
+          echo "has_requests=true" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
+
+  plan-object-access:
+    needs: detect-requests
+    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-requests.outputs.matrix) }}
     env:
-      REQUEST_FILE: ${{ github.event_name == 'workflow_dispatch' && inputs.request_file || 'uda/requests/object-access/RITM123456.yaml' }}
+      REQUEST_FILE: ${{ matrix.request_file }}
       ATTACHMENTS_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.attachments_dir || 'uda/attachments/object-access' }}
-      OUTPUT_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
+      OUTPUT_ROOT: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
 
     steps:
       - name: Checkout repository
@@ -59,16 +131,29 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
       - name: Install workflow dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pyyaml openpyxl
 
       - name: Prepare output paths
+        id: prep_paths
+        shell: bash
         run: |
-          mkdir -p "$OUTPUT_DIR"
-          echo "PARSED_JSON=$OUTPUT_DIR/parsed-object-access.json" >> "$GITHUB_ENV"
-          echo "TFVARS_JSON=$OUTPUT_DIR/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+          request_id="$(basename "$REQUEST_FILE" .yaml)"
+          output_dir="$OUTPUT_ROOT/$request_id"
+          mkdir -p "$output_dir"
+          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
+          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
+          echo "PARSED_JSON=$output_dir/parsed-object-access.json" >> "$GITHUB_ENV"
+          echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
+          echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
+          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
 
       - name: Resolve template path from request YAML
         id: resolve_template
@@ -120,43 +205,6 @@ jobs:
             --input-json "$PARSED_JSON" \
             --output-json "$TFVARS_JSON"
 
-      - name: Publish validate outputs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: uda-dbx-object-access-validate-output
-          path: ${{ env.OUTPUT_DIR }}
-          if-no-files-found: warn
-
-  plan-object-access:
-    needs: validate-object-access
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_plan }}
-    runs-on: ubuntu-latest
-    env:
-      REQUEST_FILE: ${{ github.event_name == 'workflow_dispatch' && inputs.request_file || 'uda/requests/object-access/RITM123456.yaml' }}
-      ATTACHMENTS_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.attachments_dir || 'uda/attachments/object-access' }}
-      OUTPUT_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Prepare output paths
-        run: |
-          mkdir -p "$OUTPUT_DIR"
-          echo "TFVARS_JSON=$OUTPUT_DIR/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
-          echo "TFPLAN_BIN=$OUTPUT_DIR/object-access.tfplan" >> "$GITHUB_ENV"
-          echo "TFPLAN_TXT=$OUTPUT_DIR/object-access-plan.txt" >> "$GITHUB_ENV"
-
-      - name: Download validate outputs
-        uses: actions/download-artifact@v4
-        with:
-          name: uda-dbx-object-access-validate-output
-          path: ${{ env.OUTPUT_DIR }}
-
       - name: Azure login
         uses: azure/login@v2
         with:
@@ -194,8 +242,12 @@ jobs:
           get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID DATABRICKS-CLIENT-ID
           get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET DATABRICKS-CLIENT-SECRET
           get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID DATABRICKS-TENANT-ID
+          get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP TFSTATE-RESOURCE-GROUP-DBX-UDA
+          get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
+          get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
+          get_kv_secret TFSTATE_KEY_VALUE TFSTATE-KEY-DBX TFSTATE-KEY
 
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE; do
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
@@ -218,6 +270,11 @@ jobs:
           echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
+          echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_KEY=$TFSTATE_KEY_VALUE" >> "$GITHUB_ENV"
+
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
@@ -227,7 +284,12 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             echo "Terraform init attempt $attempt/3"
-            if terraform -chdir=terraform init; then
+            if terraform -chdir=terraform init \
+              -backend-config="resource_group_name=$TF_BACKEND_RESOURCE_GROUP_NAME" \
+              -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
+              -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
+              -backend-config="key=$TF_BACKEND_KEY" \
+              -backend-config="use_azuread_auth=true"; then
               exit 0
             fi
             if [ "$attempt" -lt 3 ]; then
@@ -252,17 +314,32 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: uda-dbx-object-access-plan-output
-          path: ${{ env.OUTPUT_DIR }}
+          name: uda-dbx-object-access-plan-output-${{ steps.prep_paths.outputs.request_id }}
+          path: ${{ steps.prep_paths.outputs.output_dir }}
           if-no-files-found: warn
 
+      - name: Write plan summary
+        if: always()
+        run: |
+          {
+            echo "## Plan Result"
+            echo "- Request file: $REQUEST_FILE"
+            echo "- Template file: ${{ steps.resolve_template.outputs.template_file }}"
+            echo "- Output dir: $OUTPUT_DIR"
+            echo "- Plan text: $TFPLAN_TXT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   apply-object-access:
-    needs: plan-object-access
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_apply }}
+    needs: [detect-requests, plan-object-access]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply && needs.detect-requests.outputs.has_requests == 'true' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-requests.outputs.matrix) }}
     environment: prod
     env:
-      OUTPUT_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
+      REQUEST_FILE: ${{ matrix.request_file }}
+      OUTPUT_ROOT: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
 
     steps:
       - name: Checkout repository
@@ -272,15 +349,23 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Prepare output paths
+        id: prep_paths
+        shell: bash
         run: |
-          mkdir -p "$OUTPUT_DIR"
-          echo "TFPLAN_BIN=$OUTPUT_DIR/object-access.tfplan" >> "$GITHUB_ENV"
+          request_id="$(basename "$REQUEST_FILE" .yaml)"
+          output_dir="$OUTPUT_ROOT/$request_id"
+          mkdir -p "$output_dir"
+          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
+          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
+          echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
+          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
 
       - name: Download plan outputs
         uses: actions/download-artifact@v4
         with:
-          name: uda-dbx-object-access-plan-output
-          path: ${{ env.OUTPUT_DIR }}
+          name: uda-dbx-object-access-plan-output-${{ steps.prep_paths.outputs.request_id }}
+          path: ${{ steps.prep_paths.outputs.output_dir }}
 
       - name: Azure login
         uses: azure/login@v2
@@ -319,8 +404,12 @@ jobs:
           get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID DATABRICKS-CLIENT-ID
           get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET DATABRICKS-CLIENT-SECRET
           get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID DATABRICKS-TENANT-ID
+          get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP TFSTATE-RESOURCE-GROUP-DBX-UDA
+          get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
+          get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
+          get_kv_secret TFSTATE_KEY_VALUE TFSTATE-KEY-DBX TFSTATE-KEY
 
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE; do
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
@@ -343,6 +432,11 @@ jobs:
           echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
+          echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_KEY=$TFSTATE_KEY_VALUE" >> "$GITHUB_ENV"
+
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
@@ -352,7 +446,12 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             echo "Terraform init attempt $attempt/3"
-            if terraform -chdir=terraform init; then
+            if terraform -chdir=terraform init \
+              -backend-config="resource_group_name=$TF_BACKEND_RESOURCE_GROUP_NAME" \
+              -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
+              -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
+              -backend-config="key=$TF_BACKEND_KEY" \
+              -backend-config="use_azuread_auth=true"; then
               exit 0
             fi
             if [ "$attempt" -lt 3 ]; then
