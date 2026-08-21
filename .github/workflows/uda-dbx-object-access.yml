@@ -179,7 +179,7 @@ jobs:
             local names=("$@")
             local value=""
             for secret_name in "${names[@]}"; do
-              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r')"
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
               if [ -n "$value" ]; then
                 printf -v "$out_var" '%s' "$value"
                 return 0
@@ -293,7 +293,7 @@ jobs:
             local names=("$@")
             local value=""
             for secret_name in "${names[@]}"; do
-              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r')"
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
               if [ -n "$value" ]; then
                 printf -v "$out_var" '%s' "$value"
                 return 0
