@@ -11,6 +11,6 @@ ad_group_owner_email: jane.smith@rogers.com
 service_account_name: ""
 service_account_owner_name: ""
 service_account_owner_email: ""
-template_file: ObjectAccessTemplate1.xlsx
+template_file: ObjectAccessTemplate3.xlsx
 justification: Finance analytics reporting acces for quarterly closses
 additional_information: Approved ESMT request with object access template attached
