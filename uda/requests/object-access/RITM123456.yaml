@@ -12,5 +12,5 @@ service_account_name: ""
 service_account_owner_name: ""
 service_account_owner_email: ""
 template_file: ObjectAccessTemplate1.xlsx
-justification: Finance analytics rportn accs for quarterly closses
+justification: Finance analytcs rportn accs for quarterly closses
 additional_information: Approved EST request with object access template attached
