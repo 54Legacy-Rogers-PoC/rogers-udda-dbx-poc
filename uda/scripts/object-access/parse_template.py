@@ -24,8 +24,6 @@ except ImportError as exc:  # pragma: no cover - runtime dependency
 
 
 REQUIRED_COLUMNS = [
-	"Record_ID",
-	"Activity",
 	"Environment",
 	"Access_For",
 	"Principal_Name",
@@ -33,10 +31,23 @@ REQUIRED_COLUMNS = [
 	"Catalog",
 	"Schema",
 	"Object_Name",
-	"Folder_Path",
-	"Privilege",
-	"Justification",
 ]
+
+HEADER_ALIASES = {
+	"Record_ID": {"Record_ID", "record_id"},
+	"Activity": {"Activity", "activity"},
+	"Environment": {"Environment", "ENV", "Env", "environment"},
+	"Access_For": {"Access_For", "Access_for", "access_for"},
+	"Principal_Name": {"Principal_Name", "principal_name"},
+	"Object_Type": {"Object_Type", "object_type"},
+	"Catalog": {"Catalog", "catalog"},
+	"Schema": {"Schema", "schema"},
+	"Object_Name": {"Object_Name", "Object", "View", "view", "object_name"},
+	"Folder_Path": {"Folder_Path", "folder_path"},
+	"Privilege": {"Privilege", "privilege"},
+	"Justification": {"Justification", "justification"},
+	"Additional_Information": {"Additional_Information", "additional_information"},
+}
 
 
 def _normalize(value: Any) -> str:
@@ -47,6 +58,35 @@ def _normalize(value: Any) -> str:
 
 def _is_blank(value: Any) -> bool:
 	return _normalize(value) == ""
+
+
+def _default_privilege(object_type: str) -> str:
+	defaults = {
+		"CATALOG": "USE_CATALOG",
+		"SCHEMA": "USE_SCHEMA",
+		"VIEW": "SELECT",
+		"FOLDER": "READ",
+	}
+	return defaults.get(object_type.upper(), "")
+
+
+def _canonical_headers(raw_headers: list[str]) -> list[str]:
+	canonical_headers: list[str] = []
+
+	for header in raw_headers:
+		if header == "":
+			canonical_headers.append("")
+			continue
+
+		mapped = None
+		for canonical, aliases in HEADER_ALIASES.items():
+			if header in aliases:
+				mapped = canonical
+				break
+
+		canonical_headers.append(mapped or header)
+
+	return canonical_headers
 
 
 def _read_request_context(request_file: Path | None) -> dict[str, str]:
@@ -72,6 +112,7 @@ def _read_request_context(request_file: Path | None) -> dict[str, str]:
 		"access_for": access_for,
 		"activity_type": _normalize(payload.get("activity_type")).upper(),
 		"principal_name": principal_name,
+		"justification": _normalize(payload.get("justification")),
 	}
 
 
@@ -85,7 +126,8 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 
 	sheet = workbook[sheet_name]
 	header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
-	headers = [_normalize(v) for v in (header_cells or [])]
+	raw_headers = [_normalize(v) for v in (header_cells or [])]
+	headers = _canonical_headers(raw_headers)
 
 	missing = [column for column in REQUIRED_COLUMNS if column not in headers]
 	if missing:
@@ -112,21 +154,25 @@ def _normalize_row(row: dict[str, Any], request_context: dict[str, str]) -> dict
 	environment = row_environment or request_context.get("environment", "")
 	access_for = row_access_for or request_context.get("access_for", "")
 	principal_name = row_principal or request_context.get("principal_name", "")
+	object_type = _normalize(row.get("Object_Type")).upper()
+	privilege = _normalize(row.get("Privilege")).upper() or _default_privilege(object_type)
+	record_id = _normalize(row.get("Record_ID")) or f"ROW-{row['_row']:04d}"
+	justification = _normalize(row.get("Justification")) or request_context.get("justification", "")
 
 	return {
 		"row_number": row["_row"],
-		"record_id": _normalize(row.get("Record_ID")),
+		"record_id": record_id,
 		"activity": activity,
 		"environment": environment,
 		"access_for": access_for,
 		"principal_name": principal_name,
-		"object_type": _normalize(row.get("Object_Type")).upper(),
+		"object_type": object_type,
 		"catalog": _normalize(row.get("Catalog")),
 		"schema": _normalize(row.get("Schema")),
 		"object_name": _normalize(row.get("Object_Name")),
 		"folder_path": _normalize(row.get("Folder_Path")),
-		"privilege": _normalize(row.get("Privilege")).upper(),
-		"justification": _normalize(row.get("Justification")),
+		"privilege": privilege,
+		"justification": justification,
 		"additional_information": _normalize(row.get("Additional_Information")),
 	}
 

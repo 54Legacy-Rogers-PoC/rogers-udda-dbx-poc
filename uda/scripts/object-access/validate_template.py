@@ -24,8 +24,6 @@ except ImportError as exc:  # pragma: no cover - runtime dependency
 
 
 REQUIRED_COLUMNS = [
-	"Record_ID",
-	"Activity",
 	"Environment",
 	"Access_For",
 	"Principal_Name",
@@ -33,12 +31,25 @@ REQUIRED_COLUMNS = [
 	"Catalog",
 	"Schema",
 	"Object_Name",
-	"Folder_Path",
-	"Privilege",
-	"Justification",
 ]
 
-OPTIONAL_COLUMNS = ["Additional_Information"]
+OPTIONAL_COLUMNS = ["Record_ID", "Activity", "Folder_Path", "Privilege", "Justification", "Additional_Information"]
+
+HEADER_ALIASES = {
+	"Record_ID": {"Record_ID", "record_id"},
+	"Activity": {"Activity", "activity"},
+	"Environment": {"Environment", "ENV", "Env", "environment"},
+	"Access_For": {"Access_For", "Access_for", "access_for"},
+	"Principal_Name": {"Principal_Name", "principal_name"},
+	"Object_Type": {"Object_Type", "object_type"},
+	"Catalog": {"Catalog", "catalog"},
+	"Schema": {"Schema", "schema"},
+	"Object_Name": {"Object_Name", "Object", "View", "view", "object_name"},
+	"Folder_Path": {"Folder_Path", "folder_path"},
+	"Privilege": {"Privilege", "privilege"},
+	"Justification": {"Justification", "justification"},
+	"Additional_Information": {"Additional_Information", "additional_information"},
+}
 
 ALLOWED_ACTIVITY = {"ADD", "REMOVE"}
 ALLOWED_ENV = {"DEV", "QA", "PRD"}
@@ -82,6 +93,46 @@ def _normalize(value: Any) -> str:
 
 def _is_blank(value: Any) -> bool:
 	return _normalize(value) == ""
+
+
+def _default_privilege(object_type: str) -> str:
+	defaults = {
+		"CATALOG": "USE_CATALOG",
+		"SCHEMA": "USE_SCHEMA",
+		"VIEW": "SELECT",
+		"FOLDER": "READ",
+	}
+	return defaults.get(object_type.upper(), "")
+
+
+def _effective_privilege(record: dict[str, Any]) -> str:
+	object_type = _normalize(record.get("Object_Type")).upper()
+	row_privilege = _normalize(record.get("Privilege")).upper()
+	return row_privilege or _default_privilege(object_type)
+
+
+def _canonical_headers(raw_headers: list[str]) -> tuple[list[str], list[str]]:
+	canonical_headers: list[str] = []
+	unrecognized: list[str] = []
+
+	for header in raw_headers:
+		if header == "":
+			canonical_headers.append("")
+			continue
+
+		mapped = None
+		for canonical, aliases in HEADER_ALIASES.items():
+			if header in aliases:
+				mapped = canonical
+				break
+
+		if mapped is None:
+			canonical_headers.append(header)
+			unrecognized.append(header)
+		else:
+			canonical_headers.append(mapped)
+
+	return canonical_headers, unrecognized
 
 
 def _read_request_context(request_file: Path | None) -> dict[str, str]:
@@ -138,7 +189,8 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 
 	sheet = workbook[sheet_name]
 	header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
-	headers = [_normalize(v) for v in (header_cells or [])]
+	raw_headers = [_normalize(v) for v in (header_cells or [])]
+	headers, _ = _canonical_headers(raw_headers)
 
 	missing = [c for c in REQUIRED_COLUMNS if c not in headers]
 	if missing:
@@ -167,15 +219,7 @@ def _validate_row_required(record: dict[str, Any], request_context: dict[str, st
 	errors: list[ValidationError] = []
 	row_no = record["_row"]
 
-	mandatory_fields = [
-		"Record_ID",
-		"Environment",
-		"Access_For",
-		"Principal_Name",
-		"Object_Type",
-		"Privilege",
-		"Justification",
-	]
+	mandatory_fields = ["Environment", "Access_For", "Principal_Name", "Object_Type"]
 
 	for field in mandatory_fields:
 		if _is_blank(record.get(field)):
@@ -196,6 +240,16 @@ def _validate_row_required(record: dict[str, Any], request_context: dict[str, st
 				row=row_no,
 				field="Activity",
 				message="Activity is blank and no request-level activity_type was provided",
+			)
+		)
+
+	if _effective_privilege(record) == "":
+		errors.append(
+			ValidationError(
+				code="TPL-010",
+				row=row_no,
+				field="Privilege",
+				message="Privilege is missing and no default can be inferred from Object_Type",
 			)
 		)
 
@@ -315,7 +369,7 @@ def _validate_conditional_fields(record: dict[str, Any]) -> list[ValidationError
 def _validate_privilege(record: dict[str, Any]) -> list[ValidationError]:
 	row_no = record["_row"]
 	object_type = _normalize(record.get("Object_Type")).upper()
-	privilege = _normalize(record.get("Privilege")).upper()
+	privilege = _effective_privilege(record)
 
 	if object_type not in ALLOWED_PRIVILEGES:
 		return []
@@ -412,7 +466,7 @@ def _validate_duplicates(records: list[dict[str, Any]], request_context: dict[st
 			elif field == "Object_Type":
 				key_parts.append(_normalize(record.get(field)).upper())
 			elif field == "Privilege":
-				key_parts.append(_normalize(record.get(field)).upper())
+				key_parts.append(_effective_privilege(record))
 			else:
 				key_parts.append(_normalize(record.get(field)))
 
@@ -429,6 +483,109 @@ def _validate_duplicates(records: list[dict[str, Any]], request_context: dict[st
 			)
 		else:
 			seen[key] = record["_row"]
+
+	return errors
+
+
+def _effective_activity(record: dict[str, Any], request_context: dict[str, str]) -> str:
+	activity = _normalize(record.get("Activity"))
+	if activity == "":
+		activity = request_context.get("activity_type", "")
+	return activity.upper()
+
+
+def _validate_add_prerequisites(records: list[dict[str, Any]], request_context: dict[str, str]) -> list[ValidationError]:
+	errors: list[ValidationError] = []
+
+	catalog_keys: set[tuple[str, str, str, str]] = set()
+	schema_keys: set[tuple[str, str, str, str, str]] = set()
+
+	view_rows: list[tuple[int, tuple[str, str, str, str], tuple[str, str, str, str, str]]] = []
+	schema_rows: list[tuple[int, tuple[str, str, str, str]]] = []
+	catalog_privileges: dict[tuple[str, str, str, str], set[str]] = {}
+	schema_privileges: dict[tuple[str, str, str, str, str], set[str]] = {}
+
+	for record in records:
+		if _effective_activity(record, request_context) != "ADD":
+			continue
+
+		env = _normalize(record.get("Environment")).upper()
+		access_for = _normalize(record.get("Access_For")).lower()
+		principal = _normalize(record.get("Principal_Name")).lower()
+		catalog = _normalize(record.get("Catalog"))
+		schema = _normalize(record.get("Schema"))
+		object_type = _normalize(record.get("Object_Type")).upper()
+
+		catalog_key = (env, access_for, principal, catalog)
+		schema_key = (env, access_for, principal, catalog, schema)
+
+		if object_type == "CATALOG":
+			catalog_keys.add(catalog_key)
+			catalog_privileges.setdefault(catalog_key, set()).add(_effective_privilege(record))
+		elif object_type == "SCHEMA":
+			schema_keys.add(schema_key)
+			schema_privileges.setdefault(schema_key, set()).add(_effective_privilege(record))
+			schema_rows.append((record["_row"], catalog_key))
+		elif object_type == "VIEW":
+			view_rows.append((record["_row"], catalog_key, schema_key))
+
+	for row_no, catalog_key in schema_rows:
+		if catalog_key not in catalog_keys:
+			errors.append(
+				ValidationError(
+					code="TPL-011",
+					row=row_no,
+					field="Object_Type",
+					message="SCHEMA ADD requires matching CATALOG ADD row for the same Environment/Access_For/Principal/Catalog",
+				)
+			)
+		if "USE_CATALOG" not in catalog_privileges.get(catalog_key, set()):
+			errors.append(
+				ValidationError(
+					code="TPL-011",
+					row=row_no,
+					field="Privilege",
+					message="SCHEMA ADD requires matching CATALOG ADD privilege USE_CATALOG for the same Environment/Access_For/Principal/Catalog",
+				)
+			)
+
+	for row_no, catalog_key, schema_key in view_rows:
+		if schema_key not in schema_keys:
+			errors.append(
+				ValidationError(
+					code="TPL-011",
+					row=row_no,
+					field="Object_Type",
+					message="VIEW ADD requires matching SCHEMA ADD row for the same Environment/Access_For/Principal/Catalog/Schema",
+				)
+			)
+		if "USE_SCHEMA" not in schema_privileges.get(schema_key, set()):
+			errors.append(
+				ValidationError(
+					code="TPL-011",
+					row=row_no,
+					field="Privilege",
+					message="VIEW ADD requires matching SCHEMA ADD privilege USE_SCHEMA for the same Environment/Access_For/Principal/Catalog/Schema",
+				)
+			)
+		if catalog_key not in catalog_keys:
+			errors.append(
+				ValidationError(
+					code="TPL-011",
+					row=row_no,
+					field="Object_Type",
+					message="VIEW ADD requires matching CATALOG ADD row for the same Environment/Access_For/Principal/Catalog",
+				)
+			)
+		if "USE_CATALOG" not in catalog_privileges.get(catalog_key, set()):
+			errors.append(
+				ValidationError(
+					code="TPL-011",
+					row=row_no,
+					field="Privilege",
+					message="VIEW ADD requires matching CATALOG ADD privilege USE_CATALOG for the same Environment/Access_For/Principal/Catalog",
+				)
+			)
 
 	return errors
 
@@ -464,6 +621,7 @@ def validate_template_file(
 		errors.extend(_validate_privilege(record))
 		errors.extend(_validate_cross_field_consistency(record, request_context))
 
+	errors.extend(_validate_add_prerequisites(rows, request_context))
 	errors.extend(_validate_duplicates(rows, request_context))
 	return errors
 

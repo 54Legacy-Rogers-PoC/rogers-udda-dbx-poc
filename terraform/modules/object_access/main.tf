@@ -97,6 +97,10 @@ resource "databricks_grant" "catalog_add" {
 resource "databricks_grant" "schema_add" {
   for_each = local.schema_add_record_map
 
+  depends_on = [
+    databricks_grant.catalog_add,
+  ]
+
   schema    = format("%s.%s", each.value.catalog, each.value.schema)
   principal = each.value.principal_name
   privileges = [
@@ -106,6 +110,11 @@ resource "databricks_grant" "schema_add" {
 
 resource "databricks_grant" "view_add" {
   for_each = local.view_add_record_map
+
+  depends_on = [
+    databricks_grant.catalog_add,
+    databricks_grant.schema_add,
+  ]
 
   table     = format("%s.%s.%s", each.value.catalog, each.value.schema, each.value.object_name)
   principal = each.value.principal_name
