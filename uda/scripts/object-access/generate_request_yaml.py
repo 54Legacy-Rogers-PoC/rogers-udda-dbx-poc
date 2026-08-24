@@ -190,6 +190,20 @@ def _validate_request_id(request_id: str) -> None:
 		raise ValueError("request_id must match pattern RITM<digits>")
 
 
+def _load_yaml_template(template_file: Path) -> dict[str, Any]:
+	if not template_file.exists():
+		return {}
+
+	with template_file.open("r", encoding="utf-8") as handle:
+		loaded = yaml.safe_load(handle)
+
+	if loaded is None:
+		return {}
+	if not isinstance(loaded, dict):
+		raise ValueError("YAML template root must be a mapping")
+	return loaded
+
+
 def _build_payload(
 	request_id: str,
 	template_file_name: str,
@@ -291,6 +305,11 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument("--request-id", required=True, help="Request id, e.g. RITM123456")
 	parser.add_argument("--template-file", required=True, help="Path to ObjectAccessTemplate.xlsx")
 	parser.add_argument("--output-file", help="Output YAML path. Default: uda/requests/object-access/<request_id>.yaml")
+	parser.add_argument(
+		"--yaml-template-file",
+		default="",
+		help="Optional request YAML template to pre-populate fields",
+	)
 	parser.add_argument("--sheet-name", default="ObjectAccess", help="Object list worksheet name")
 	parser.add_argument("--request-sheet-name", default="", help="Request info worksheet name (default: first sheet)")
 	parser.add_argument("--platform", default="databricks", help="platform field")
@@ -335,6 +354,19 @@ def main() -> int:
 			justification=args.justification,
 			additional_information=args.additional_information,
 		)
+
+		if args.yaml_template_file:
+			yaml_template_file = Path(args.yaml_template_file).resolve()
+		else:
+			yaml_template_file = (
+				Path(__file__).resolve().parents[2]
+				/ "templates"
+				/ "object-access"
+				/ "object-access-yaml-template.yaml"
+			)
+
+		template_payload = _load_yaml_template(yaml_template_file)
+		payload = {**template_payload, **payload}
 
 		if args.output_file:
 			output_file = Path(args.output_file).resolve()

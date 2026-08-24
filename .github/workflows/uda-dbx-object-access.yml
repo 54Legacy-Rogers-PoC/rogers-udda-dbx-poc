@@ -5,19 +5,15 @@ on:
     branches:
       - "**"
     paths:
-      - "uda/requests/object-access/*.yaml"
       - "uda/attachments/object-access/**"
-      - "uda/scripts/object-access/**"
-      - "terraform/**"
+      - "uda/templates/object-access/object-access-yaml-template.yaml"
       - ".github/workflows/uda-dbx-object-access.yml"
   pull_request:
     branches:
       - "**"
     paths:
-      - "uda/requests/object-access/*.yaml"
       - "uda/attachments/object-access/**"
-      - "uda/scripts/object-access/**"
-      - "terraform/**"
+      - "uda/templates/object-access/object-access-yaml-template.yaml"
       - ".github/workflows/uda-dbx-object-access.yml"
   workflow_dispatch:
     inputs:
