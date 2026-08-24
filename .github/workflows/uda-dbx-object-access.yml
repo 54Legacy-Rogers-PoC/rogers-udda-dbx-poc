@@ -1,16 +1,15 @@
 name: UDA Databricks Object Access
-
 on:
   push:
     branches:
-      - main
+      - feature-furqan-udda
     paths:
       - "uda/attachments/object-access/**"
       - "uda/templates/object-access/object-access-yaml-template.yaml"
       - ".github/workflows/uda-dbx-object-access.yml"
   pull_request:
     branches:
-      - main
+      - feature-furqan-udda
     paths:
       - "uda/attachments/object-access/**"
       - "uda/templates/object-access/object-access-yaml-template.yaml"
