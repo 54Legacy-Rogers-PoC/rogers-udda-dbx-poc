@@ -544,7 +544,7 @@ jobs:
 
   apply-object-access:
     needs: [detect-requests, plan-object-access]
-    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.run_plan && inputs.run_apply)) }}
+    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/furqan-udda')) || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/furqan-udda') && inputs.run_plan && inputs.run_apply)) }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
