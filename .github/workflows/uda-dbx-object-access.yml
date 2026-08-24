@@ -238,6 +238,9 @@ jobs:
           set -euo pipefail
           request_id="$(basename "$REQUEST_FILE" .yaml)"
           template_file="$ATTACHMENTS_DIR/$request_id.xlsx"
+          if [ ! -f "$template_file" ] && [ -f "$ATTACHMENTS_DIR/$request_id.xlsm" ]; then
+            template_file="$ATTACHMENTS_DIR/$request_id.xlsm"
+          fi
           if [ ! -f "$template_file" ] && [ -f "$ATTACHMENTS_DIR/$request_id.xls" ]; then
             template_file="$ATTACHMENTS_DIR/$request_id.xls"
           fi
@@ -642,6 +645,9 @@ jobs:
           set -euo pipefail
           request_id="$(basename "$REQUEST_FILE" .yaml)"
           template_file="$ATTACHMENTS_DIR/$request_id.xlsx"
+          if [ ! -f "$template_file" ] && [ -f "$ATTACHMENTS_DIR/$request_id.xlsm" ]; then
+            template_file="$ATTACHMENTS_DIR/$request_id.xlsm"
+          fi
           if [ ! -f "$template_file" ] && [ -f "$ATTACHMENTS_DIR/$request_id.xls" ]; then
             template_file="$ATTACHMENTS_DIR/$request_id.xls"
           fi
