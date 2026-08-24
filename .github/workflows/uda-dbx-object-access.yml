@@ -241,16 +241,7 @@ jobs:
 
           if [ ! -f "$template_file" ]; then
             if [ -f "$REQUEST_FILE" ]; then
-              template_candidate="$(python - <<'PY'
-              import os
-              from pathlib import Path
-              import yaml
-
-              request_file = Path(os.environ["REQUEST_FILE"])
-              payload = yaml.safe_load(request_file.read_text(encoding="utf-8")) or {}
-              print(str(payload.get("template_file", "")).strip())
-              PY
-              )"
+              template_candidate="$(python -c "import os,yaml; from pathlib import Path; p=Path(os.environ['REQUEST_FILE']); d=yaml.safe_load(p.read_text(encoding='utf-8')) or {}; print(str(d.get('template_file','')).strip())")"
               if [ -n "$template_candidate" ] && [ -f "$ATTACHMENTS_DIR/$template_candidate" ]; then
                 template_file="$ATTACHMENTS_DIR/$template_candidate"
               fi
