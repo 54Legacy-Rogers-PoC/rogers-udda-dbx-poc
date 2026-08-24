@@ -149,15 +149,54 @@ jobs:
 
             attachment_name="$(basename "$attachment")"
             request_stem="${attachment_name%.*}"
+            linked=0
 
             if [[ "$request_stem" =~ ^RITM[0-9]+$ ]]; then
               candidate_request="uda/requests/object-access/$request_stem.yaml"
               if [ -f "$candidate_request" ]; then
                 add_request_file "$candidate_request"
-              else
-                echo "Attachment changed but matching request YAML not found: $candidate_request" >&2
+                linked=1
+              fi
+            fi
+
+            if [ "$linked" -eq 0 ]; then
+              mapfile -t yaml_matches < <(python - "$attachment_name" <<'PY'
+              import re
+              import sys
+              from pathlib import Path
+
+              attachment_name = sys.argv[1]
+              requests_dir = Path("uda/requests/object-access")
+              pattern = re.compile(
+                  r"^\s*template_file\s*:\s*['\"]?([^'\"\s#]+)['\"]?\s*$",
+                  re.IGNORECASE,
+              )
+
+              matches = []
+              for request_file in sorted(requests_dir.glob("*.yaml")):
+                  for line in request_file.read_text(encoding="utf-8").splitlines():
+                      found = pattern.match(line)
+                      if found and found.group(1).strip() == attachment_name:
+                          matches.append(str(request_file).replace('\\\\', '/'))
+                          break
+
+              for item in matches:
+                  print(item)
+              PY
+              )
+
+              if [ "${#yaml_matches[@]}" -eq 1 ]; then
+                add_request_file "${yaml_matches[0]}"
+                linked=1
+              elif [ "${#yaml_matches[@]}" -gt 1 ]; then
+                echo "Attachment $attachment_name matches multiple request YAML files: ${yaml_matches[*]}" >&2
                 missing_request_links=1
               fi
+            fi
+
+            if [ "$linked" -eq 0 ]; then
+              echo "Attachment changed but request YAML link could not be resolved for: $attachment_name" >&2
+              missing_request_links=1
             fi
           done
 
