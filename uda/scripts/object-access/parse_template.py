@@ -33,6 +33,8 @@ REQUIRED_COLUMNS = [
 	"Object_Name",
 ]
 
+COMPACT_REQUIRED_COLUMNS = ["Activity", "Catalog", "Schema", "Object_Name"]
+
 HEADER_ALIASES = {
 	"Record_ID": {"Record_ID", "record_id"},
 	"Activity": {"Activity", "activity"},
@@ -40,9 +42,13 @@ HEADER_ALIASES = {
 	"Access_For": {"Access_For", "Access_for", "access_for"},
 	"Principal_Name": {"Principal_Name", "principal_name"},
 	"Object_Type": {"Object_Type", "object_type"},
-	"Catalog": {"Catalog", "catalog"},
-	"Schema": {"Schema", "schema"},
-	"Object_Name": {"Object_Name", "Object", "View", "view", "object_name"},
+	"Catalog": {"Catalog", "catalog", "UC Catalog"},
+	"Schema": {
+		"Schema",
+		"schema",
+		"EDL Schema Name/Folder Name (vw_*) / Sandbox Name (vw_slfsrv_*) For non-EDL / <schema name>",
+	},
+	"Object_Name": {"Object_Name", "Object", "View", "view", "object_name", "Object Name"},
 	"Folder_Path": {"Folder_Path", "folder_path"},
 	"Privilege": {"Privilege", "privilege"},
 	"Justification": {"Justification", "justification"},
@@ -54,6 +60,36 @@ def _normalize(value: Any) -> str:
 	if value is None:
 		return ""
 	return str(value).strip()
+
+
+def _header_key(value: str) -> str:
+	return " ".join(_normalize(value).replace("\n", " ").split()).lower()
+
+
+def _normalize_environment(value: str) -> str:
+	mapped = {
+		"PROD": "PRD",
+		"PRODUCTION": "PRD",
+		"PRD": "PRD",
+		"QA": "QA",
+		"DEV": "DEV",
+	}
+	upper = value.upper()
+	return mapped.get(upper, upper)
+
+
+def _normalize_activity(value: str) -> str:
+	mapped = {
+		"ADD": "ADD",
+		"ADD OBJECT": "ADD",
+		"ADD OBJECTS": "ADD",
+		"REMOVE": "REMOVE",
+		"REMOVE OBJECT": "REMOVE",
+		"REMOVE OBJECTS": "REMOVE",
+		"REVOKE": "REMOVE",
+	}
+	upper = value.upper()
+	return mapped.get(upper, upper)
 
 
 def _is_blank(value: Any) -> bool:
@@ -72,6 +108,10 @@ def _default_privilege(object_type: str) -> str:
 
 def _canonical_headers(raw_headers: list[str]) -> list[str]:
 	canonical_headers: list[str] = []
+	header_alias_keys: dict[str, set[str]] = {
+		canonical: {_header_key(alias) for alias in aliases}
+		for canonical, aliases in HEADER_ALIASES.items()
+	}
 
 	for header in raw_headers:
 		if header == "":
@@ -79,8 +119,9 @@ def _canonical_headers(raw_headers: list[str]) -> list[str]:
 			continue
 
 		mapped = None
+		normalized_header = _header_key(header)
 		for canonical, aliases in HEADER_ALIASES.items():
-			if header in aliases:
+			if normalized_header in header_alias_keys[canonical]:
 				mapped = canonical
 				break
 
@@ -127,14 +168,22 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 	sheet = workbook[sheet_name]
 	header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
 	raw_headers = [_normalize(v) for v in (header_cells or [])]
+	if _header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
+		header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
+		raw_headers = [_normalize(v) for v in (header_cells or [])]
+		min_row = 3
+	else:
+		min_row = 2
 	headers = _canonical_headers(raw_headers)
 
-	missing = [column for column in REQUIRED_COLUMNS if column not in headers]
+	is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
+	required_columns = COMPACT_REQUIRED_COLUMNS if is_compact_format else REQUIRED_COLUMNS
+	missing = [column for column in required_columns if column not in headers]
 	if missing:
 		raise ValueError(f"Missing required columns: {', '.join(missing)}")
 
 	rows: list[dict[str, Any]] = []
-	for row_idx, row_values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+	for row_idx, row_values in enumerate(sheet.iter_rows(min_row=min_row, values_only=True), start=min_row):
 		row_dict = {headers[i]: row_values[i] if i < len(row_values) else None for i in range(len(headers))}
 		if all(_is_blank(v) for v in row_dict.values()):
 			continue
@@ -150,13 +199,26 @@ def _normalize_row(row: dict[str, Any], request_context: dict[str, str]) -> dict
 	row_access_for = _normalize(row.get("Access_For")).lower()
 	row_principal = _normalize(row.get("Principal_Name"))
 
-	activity = row_activity or request_context.get("activity_type", "")
-	if activity == "REVOKE":
-		activity = "REMOVE"
-	environment = row_environment or request_context.get("environment", "")
+	activity = _normalize_activity(row_activity or request_context.get("activity_type", ""))
+	environment = _normalize_environment(row_environment or request_context.get("environment", ""))
 	access_for = row_access_for or request_context.get("access_for", "")
 	principal_name = row_principal or request_context.get("principal_name", "")
+	catalog = _normalize(row.get("Catalog"))
+	schema = _normalize(row.get("Schema"))
+	object_name = _normalize(row.get("Object_Name"))
+	folder_path = _normalize(row.get("Folder_Path"))
+
 	object_type = _normalize(row.get("Object_Type")).upper()
+	if object_type == "":
+		if folder_path != "":
+			object_type = "FOLDER"
+		elif object_name != "":
+			object_type = "VIEW"
+		elif schema != "":
+			object_type = "SCHEMA"
+		elif catalog != "":
+			object_type = "CATALOG"
+
 	privilege = _normalize(row.get("Privilege")).upper() or _default_privilege(object_type)
 	record_id = _normalize(row.get("Record_ID")) or f"ROW-{row['_row']:04d}"
 	justification = _normalize(row.get("Justification")) or request_context.get("justification", "")
@@ -169,10 +231,10 @@ def _normalize_row(row: dict[str, Any], request_context: dict[str, str]) -> dict
 		"access_for": access_for,
 		"principal_name": principal_name,
 		"object_type": object_type,
-		"catalog": _normalize(row.get("Catalog")),
-		"schema": _normalize(row.get("Schema")),
-		"object_name": _normalize(row.get("Object_Name")),
-		"folder_path": _normalize(row.get("Folder_Path")),
+		"catalog": catalog,
+		"schema": schema,
+		"object_name": object_name,
+		"folder_path": folder_path,
 		"privilege": privilege,
 		"justification": justification,
 		"additional_information": _normalize(row.get("Additional_Information")),

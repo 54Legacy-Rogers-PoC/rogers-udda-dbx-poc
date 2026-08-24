@@ -31,7 +31,10 @@ REQUIRED_COLUMNS = [
 	"Catalog",
 	"Schema",
 	"Object_Name",
+	"Privilege",
 ]
+
+COMPACT_REQUIRED_COLUMNS = ["Activity", "Catalog", "Schema", "Object_Name"]
 
 OPTIONAL_COLUMNS = ["Record_ID", "Activity", "Folder_Path", "Privilege", "Justification", "Additional_Information"]
 
@@ -42,9 +45,13 @@ HEADER_ALIASES = {
 	"Access_For": {"Access_For", "Access_for", "access_for"},
 	"Principal_Name": {"Principal_Name", "principal_name"},
 	"Object_Type": {"Object_Type", "object_type"},
-	"Catalog": {"Catalog", "catalog"},
-	"Schema": {"Schema", "schema"},
-	"Object_Name": {"Object_Name", "Object", "View", "view", "object_name"},
+	"Catalog": {"Catalog", "catalog", "UC Catalog"},
+	"Schema": {
+		"Schema",
+		"schema",
+		"EDL Schema Name/Folder Name (vw_*) / Sandbox Name (vw_slfsrv_*) For non-EDL / <schema name>",
+	},
+	"Object_Name": {"Object_Name", "Object", "View", "view", "object_name", "Object Name"},
 	"Folder_Path": {"Folder_Path", "folder_path"},
 	"Privilege": {"Privilege", "privilege"},
 	"Justification": {"Justification", "justification"},
@@ -91,6 +98,36 @@ def _normalize(value: Any) -> str:
 	return str(value).strip()
 
 
+def _header_key(value: str) -> str:
+	return " ".join(_normalize(value).replace("\n", " ").split()).lower()
+
+
+def _normalize_environment(value: str) -> str:
+	mapped = {
+		"PROD": "PRD",
+		"PRODUCTION": "PRD",
+		"PRD": "PRD",
+		"QA": "QA",
+		"DEV": "DEV",
+	}
+	upper = value.upper()
+	return mapped.get(upper, upper)
+
+
+def _normalize_activity(value: str) -> str:
+	mapped = {
+		"ADD": "ADD",
+		"ADD OBJECT": "ADD",
+		"ADD OBJECTS": "ADD",
+		"REMOVE": "REMOVE",
+		"REMOVE OBJECT": "REMOVE",
+		"REMOVE OBJECTS": "REMOVE",
+		"REVOKE": "REVOKE",
+	}
+	upper = value.upper()
+	return mapped.get(upper, upper)
+
+
 def _is_blank(value: Any) -> bool:
 	return _normalize(value) == ""
 
@@ -114,6 +151,10 @@ def _effective_privilege(record: dict[str, Any]) -> str:
 def _canonical_headers(raw_headers: list[str]) -> tuple[list[str], list[str]]:
 	canonical_headers: list[str] = []
 	unrecognized: list[str] = []
+	header_alias_keys: dict[str, set[str]] = {
+		canonical: {_header_key(alias) for alias in aliases}
+		for canonical, aliases in HEADER_ALIASES.items()
+	}
 
 	for header in raw_headers:
 		if header == "":
@@ -121,8 +162,9 @@ def _canonical_headers(raw_headers: list[str]) -> tuple[list[str], list[str]]:
 			continue
 
 		mapped = None
+		normalized_header = _header_key(header)
 		for canonical, aliases in HEADER_ALIASES.items():
-			if header in aliases:
+			if normalized_header in header_alias_keys[canonical]:
 				mapped = canonical
 				break
 
@@ -190,9 +232,17 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 	sheet = workbook[sheet_name]
 	header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
 	raw_headers = [_normalize(v) for v in (header_cells or [])]
+	if _header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
+		header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
+		raw_headers = [_normalize(v) for v in (header_cells or [])]
+		min_row = 3
+	else:
+		min_row = 2
 	headers, _ = _canonical_headers(raw_headers)
 
-	missing = [c for c in REQUIRED_COLUMNS if c not in headers]
+	is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
+	required_columns = COMPACT_REQUIRED_COLUMNS if is_compact_format else REQUIRED_COLUMNS
+	missing = [c for c in required_columns if c not in headers]
 	if missing:
 		return [], [
 			ValidationError(
@@ -204,7 +254,7 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 		]
 
 	records: list[dict[str, Any]] = []
-	for row_idx, row_values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+	for row_idx, row_values in enumerate(sheet.iter_rows(min_row=min_row, values_only=True), start=min_row):
 		row_dict = {headers[i]: row_values[i] if i < len(row_values) else None for i in range(len(headers))}
 		# Ignore fully empty rows.
 		if all(_is_blank(v) for v in row_dict.values()):
@@ -213,6 +263,46 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 		records.append(row_dict)
 
 	return records, []
+
+
+def _hydrate_record(record: dict[str, Any], request_context: dict[str, str]) -> dict[str, Any]:
+	hydrated = dict(record)
+
+	row_activity = _normalize(hydrated.get("Activity"))
+	hydrated["Activity"] = _normalize_activity(row_activity or request_context.get("activity_type", ""))
+
+	row_environment = _normalize(hydrated.get("Environment"))
+	hydrated["Environment"] = _normalize_environment(row_environment or request_context.get("environment", ""))
+
+	row_access_for = _normalize(hydrated.get("Access_For")).lower()
+	hydrated["Access_For"] = row_access_for or request_context.get("access_for", "")
+
+	row_principal = _normalize(hydrated.get("Principal_Name"))
+	expected_principal = ""
+	if hydrated["Access_For"] == "ad_group":
+		expected_principal = request_context.get("ad_group_name", "")
+	elif hydrated["Access_For"] == "service_account":
+		expected_principal = request_context.get("service_account_name", "")
+	hydrated["Principal_Name"] = row_principal or expected_principal
+
+	catalog = _normalize(hydrated.get("Catalog"))
+	schema = _normalize(hydrated.get("Schema"))
+	object_name = _normalize(hydrated.get("Object_Name"))
+	folder_path = _normalize(hydrated.get("Folder_Path"))
+
+	object_type = _normalize(hydrated.get("Object_Type")).upper()
+	if object_type == "":
+		if folder_path != "":
+			object_type = "FOLDER"
+		elif object_name != "":
+			object_type = "VIEW"
+		elif schema != "":
+			object_type = "SCHEMA"
+		elif catalog != "":
+			object_type = "CATALOG"
+	hydrated["Object_Type"] = object_type
+
+	return hydrated
 
 
 def _validate_row_required(record: dict[str, Any], request_context: dict[str, str]) -> list[ValidationError]:
@@ -532,6 +622,15 @@ def _validate_add_prerequisites(records: list[dict[str, Any]], request_context: 
 		elif object_type == "VIEW":
 			view_rows.append((record["_row"], catalog_key, schema_key))
 
+	# Dependency checks are needed only when VIEW grants are present.
+	if not view_rows:
+		return []
+
+	# Compact intake templates may provide only VIEW rows and rely on existing
+	# catalog/schema grants. In that mode, skip prerequisite enforcement.
+	if view_rows and not schema_rows and not catalog_keys:
+		return []
+
 	for row_no, catalog_key in schema_rows:
 		if catalog_key not in catalog_keys:
 			errors.append(
@@ -605,27 +704,29 @@ def validate_template_file(
 	if load_errors:
 		return load_errors
 
+	hydrated_rows = [_hydrate_record(record, request_context) for record in rows]
+
 	errors: list[ValidationError] = []
 
-	if len(rows) > max_rows:
+	if len(hydrated_rows) > max_rows:
 		errors.append(
 			ValidationError(
 				code="TPL-009",
 				row=0,
 				field="row_count",
-				message=f"Template contains {len(rows)} rows; max allowed is {max_rows}",
+				message=f"Template contains {len(hydrated_rows)} rows; max allowed is {max_rows}",
 			)
 		)
 
-	for record in rows:
+	for record in hydrated_rows:
 		errors.extend(_validate_row_required(record, request_context))
 		errors.extend(_validate_row_enums(record, request_context))
 		errors.extend(_validate_conditional_fields(record))
 		errors.extend(_validate_privilege(record))
 		errors.extend(_validate_cross_field_consistency(record, request_context))
 
-	errors.extend(_validate_add_prerequisites(rows, request_context))
-	errors.extend(_validate_duplicates(rows, request_context))
+	errors.extend(_validate_add_prerequisites(hydrated_rows, request_context))
+	errors.extend(_validate_duplicates(hydrated_rows, request_context))
 	return errors
 
 

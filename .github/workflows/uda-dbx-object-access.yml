@@ -124,14 +124,50 @@ jobs:
             fi
           fi
 
-          mapfile -t changed_files < <(git diff --name-only --diff-filter=ACMR "$base_sha" "$head_sha" -- "uda/requests/object-access/*.yaml")
+          mapfile -t changed_request_files < <(git diff --name-only --diff-filter=ACMR "$base_sha" "$head_sha" -- "uda/requests/object-access/*.yaml")
+          mapfile -t changed_attachment_files < <(git diff --name-only --diff-filter=ACMR "$base_sha" "$head_sha" -- "uda/attachments/object-access/*")
 
           existing_files=()
-          for f in "${changed_files[@]}"; do
-            if [ -f "$f" ]; then
-              existing_files+=("$f")
+          missing_request_links=0
+          declare -A seen
+
+          add_request_file() {
+            local request_file="$1"
+            if [ ! -f "$request_file" ]; then
+              return
+            fi
+            if [ -z "${seen[$request_file]+x}" ]; then
+              existing_files+=("$request_file")
+              seen["$request_file"]=1
+            fi
+          }
+
+          for f in "${changed_request_files[@]}"; do
+            add_request_file "$f"
+          done
+
+          for attachment in "${changed_attachment_files[@]}"; do
+            if [ ! -f "$attachment" ]; then
+              continue
+            fi
+
+            attachment_name="$(basename "$attachment")"
+            request_stem="${attachment_name%.*}"
+
+            if [[ "$request_stem" =~ ^RITM[0-9]+$ ]]; then
+              candidate_request="uda/requests/object-access/$request_stem.yaml"
+              if [ -f "$candidate_request" ]; then
+                add_request_file "$candidate_request"
+              else
+                echo "Attachment changed but matching request YAML not found: $candidate_request" >&2
+                missing_request_links=1
+              fi
             fi
           done
+
+          if [ "$missing_request_links" -ne 0 ]; then
+            exit 1
+          fi
 
           if [ "${#existing_files[@]}" -eq 0 ]; then
             echo "has_requests=false" >> "$GITHUB_OUTPUT"
@@ -467,7 +503,7 @@ jobs:
 
   apply-object-access:
     needs: [detect-requests, plan-object-access]
-    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply)) }}
+    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.run_plan && inputs.run_apply)) }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
