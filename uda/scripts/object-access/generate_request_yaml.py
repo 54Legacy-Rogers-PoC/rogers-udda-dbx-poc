@@ -212,16 +212,21 @@ def _load_yaml_template(template_file: Path) -> dict[str, Any]:
 
 
 def _load_workbook_compat(template_file: Path) -> tuple[Any, str | None]:
-	if template_file.suffix.lower() == ".xlsx":
+	# First try openpyxl regardless of file extension. This handles files whose
+	# extension is .xls but content is actually OOXML (.xlsx).
+	try:
 		return load_workbook(filename=template_file, data_only=True), None
-
-	if template_file.suffix.lower() != ".xls":
-		raise ValueError("Template file must be .xlsx or .xls")
+	except Exception as xlsx_exc:  # pylint: disable=broad-except
+		if template_file.suffix.lower() != ".xls":
+			raise ValueError(f"Template file unreadable as xlsx: {xlsx_exc}") from xlsx_exc
 
 	if xlrd is None:
 		raise SystemExit("xlrd is required for .xls support. Install with: pip install xlrd")
 
-	xls_book = xlrd.open_workbook(str(template_file))
+	try:
+		xls_book = xlrd.open_workbook(str(template_file))
+	except Exception as xls_exc:  # pylint: disable=broad-except
+		raise ValueError(f"Template file unreadable as xls: {xls_exc}") from xls_exc
 	xlsx_book = Workbook()
 	xlsx_book.remove(xlsx_book.active)
 
