@@ -129,9 +129,6 @@ jobs:
 
           add_request_file() {
             local request_file="$1"
-            if [ ! -f "$request_file" ]; then
-              return
-            fi
             if [ -z "${seen[$request_file]+x}" ]; then
               existing_files+=("$request_file")
               seen["$request_file"]=1
@@ -153,37 +150,12 @@ jobs:
 
             if [[ "$request_stem" =~ ^RITM[0-9]+$ ]]; then
               candidate_request="uda/requests/object-access/$request_stem.yaml"
-              if [ -f "$candidate_request" ]; then
-                add_request_file "$candidate_request"
-                linked=1
-              fi
+              add_request_file "$candidate_request"
+              linked=1
             fi
 
             if [ "$linked" -eq 0 ]; then
-              mapfile -t yaml_matches < <(python - "$attachment_name" <<'PY'
-              import re
-              import sys
-              from pathlib import Path
-
-              attachment_name = sys.argv[1]
-              requests_dir = Path("uda/requests/object-access")
-              pattern = re.compile(
-                  r"^\s*template_file\s*:\s*['\"]?([^'\"\s#]+)['\"]?\s*$",
-                  re.IGNORECASE,
-              )
-
-              matches = []
-              for request_file in sorted(requests_dir.glob("*.yaml")):
-                  for line in request_file.read_text(encoding="utf-8").splitlines():
-                      found = pattern.match(line)
-                      if found and found.group(1).strip() == attachment_name:
-                          matches.append(str(request_file).replace('\\\\', '/'))
-                          break
-
-              for item in matches:
-                  print(item)
-              PY
-              )
+              mapfile -t yaml_matches < <(python -c "import re,sys;from pathlib import Path;name=sys.argv[1];req=Path('uda/requests/object-access');pat=re.compile(r'^\\s*template_file\\s*:\\s*[\'\"]?([^\'\"\\s#]+)[\'\"]?\\s*$',re.I);out=[];[out.append(str(f).replace('\\\\','/')) for f in sorted(req.glob('*.yaml')) if any((m:=pat.match(line)) and m.group(1).strip()==name for line in f.read_text(encoding='utf-8').splitlines())];print('\\n'.join(out))" "$attachment_name")
 
               if [ "${#yaml_matches[@]}" -eq 1 ]; then
                 add_request_file "${yaml_matches[0]}"
@@ -259,6 +231,48 @@ jobs:
           echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
           echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Generate or refresh request YAML from attachment
+        shell: bash
+        run: |
+          set -euo pipefail
+          request_id="$(basename "$REQUEST_FILE" .yaml)"
+          template_file="$ATTACHMENTS_DIR/$request_id.xlsx"
+
+          if [ ! -f "$template_file" ]; then
+            if [ -f "$REQUEST_FILE" ]; then
+              template_candidate="$(python - <<'PY'
+              import os
+              from pathlib import Path
+              import yaml
+
+              request_file = Path(os.environ["REQUEST_FILE"])
+              payload = yaml.safe_load(request_file.read_text(encoding="utf-8")) or {}
+              print(str(payload.get("template_file", "")).strip())
+              PY
+              )"
+              if [ -n "$template_candidate" ] && [ -f "$ATTACHMENTS_DIR/$template_candidate" ]; then
+                template_file="$ATTACHMENTS_DIR/$template_candidate"
+              fi
+            fi
+          fi
+
+          if [ ! -f "$template_file" ]; then
+            echo "Unable to resolve attachment template for request $request_id" >&2
+            exit 1
+          fi
+
+          if ! python uda/scripts/object-access/generate_request_yaml.py \
+            --request-id "$request_id" \
+            --template-file "$template_file" \
+            --sheet-name "Object List" \
+            --output-file "$REQUEST_FILE"; then
+            python uda/scripts/object-access/generate_request_yaml.py \
+              --request-id "$request_id" \
+              --template-file "$template_file" \
+              --sheet-name "ObjectAccess" \
+              --output-file "$REQUEST_FILE"
+          fi
 
       - name: Resolve template path from request YAML
         id: resolve_template
