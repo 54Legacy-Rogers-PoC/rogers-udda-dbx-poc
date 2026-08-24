@@ -593,11 +593,22 @@ jobs:
     environment: prod
     env:
       REQUEST_FILE: ${{ matrix.request_file }}
+      ATTACHMENTS_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.attachments_dir || 'uda/attachments/object-access' }}
       OUTPUT_ROOT: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install workflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml openpyxl
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -621,6 +632,39 @@ jobs:
         with:
           name: uda-dbx-object-access-plan-output-${{ steps.prep_paths.outputs.request_id }}
           path: ${{ steps.prep_paths.outputs.output_dir }}
+
+      - name: Generate or refresh request YAML from attachment
+        shell: bash
+        run: |
+          set -euo pipefail
+          request_id="$(basename "$REQUEST_FILE" .yaml)"
+          template_file="$ATTACHMENTS_DIR/$request_id.xlsx"
+
+          if [ ! -f "$template_file" ]; then
+            if [ -f "$REQUEST_FILE" ]; then
+              template_candidate="$(python -c "import os,yaml; from pathlib import Path; p=Path(os.environ['REQUEST_FILE']); d=yaml.safe_load(p.read_text(encoding='utf-8')) or {}; print(str(d.get('template_file','')).strip())")"
+              if [ -n "$template_candidate" ] && [ -f "$ATTACHMENTS_DIR/$template_candidate" ]; then
+                template_file="$ATTACHMENTS_DIR/$template_candidate"
+              fi
+            fi
+          fi
+
+          if [ ! -f "$template_file" ]; then
+            echo "Unable to resolve attachment template for request $request_id" >&2
+            exit 1
+          fi
+
+          if ! python uda/scripts/object-access/generate_request_yaml.py \
+            --request-id "$request_id" \
+            --template-file "$template_file" \
+            --sheet-name "Object List" \
+            --output-file "$REQUEST_FILE"; then
+            python uda/scripts/object-access/generate_request_yaml.py \
+              --request-id "$request_id" \
+              --template-file "$template_file" \
+              --sheet-name "ObjectAccess" \
+              --output-file "$REQUEST_FILE"
+          fi
 
       - name: Determine request activity
         shell: bash
