@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import argparse
 from datetime import date, datetime
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +24,14 @@ except ImportError as exc:  # pragma: no cover - runtime dependency
 	raise SystemExit("PyYAML is required. Install with: pip install pyyaml") from exc
 
 try:
-	from openpyxl import load_workbook
+	from openpyxl import Workbook, load_workbook
 except ImportError as exc:  # pragma: no cover - runtime dependency
 	raise SystemExit("openpyxl is required. Install with: pip install openpyxl") from exc
+
+try:
+	import xlrd
+except ImportError:
+	xlrd = None
 
 
 REQUEST_ID_REGEX = re.compile(r"^RITM[0-9]+$")
@@ -204,6 +211,34 @@ def _load_yaml_template(template_file: Path) -> dict[str, Any]:
 	return loaded
 
 
+def _load_workbook_compat(template_file: Path) -> tuple[Any, str | None]:
+	if template_file.suffix.lower() == ".xlsx":
+		return load_workbook(filename=template_file, data_only=True), None
+
+	if template_file.suffix.lower() != ".xls":
+		raise ValueError("Template file must be .xlsx or .xls")
+
+	if xlrd is None:
+		raise SystemExit("xlrd is required for .xls support. Install with: pip install xlrd")
+
+	xls_book = xlrd.open_workbook(str(template_file))
+	xlsx_book = Workbook()
+	xlsx_book.remove(xlsx_book.active)
+
+	for sheet_name in xls_book.sheet_names():
+		xls_sheet = xls_book.sheet_by_name(sheet_name)
+		xlsx_sheet = xlsx_book.create_sheet(title=sheet_name[:31] or "Sheet")
+		for row_idx in range(xls_sheet.nrows):
+			for col_idx in range(xls_sheet.ncols):
+				xlsx_sheet.cell(row=row_idx + 1, column=col_idx + 1, value=xls_sheet.cell_value(row_idx, col_idx))
+
+	with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as handle:
+		tmp_path = handle.name
+
+	xlsx_book.save(tmp_path)
+	return load_workbook(filename=tmp_path, data_only=True), tmp_path
+
+
 def _build_payload(
 	request_id: str,
 	template_file_name: str,
@@ -334,26 +369,33 @@ def main() -> int:
 		if not template_file.exists():
 			raise FileNotFoundError(f"Template file not found: {template_file}")
 
-		workbook = load_workbook(filename=template_file, data_only=True)
+		workbook, tmp_path = _load_workbook_compat(template_file)
 		request_sheet_name = args.request_sheet_name or workbook.sheetnames[0]
-		request_info = _read_request_info(workbook=workbook, request_sheet_name=request_sheet_name)
+		try:
+			request_info = _read_request_info(workbook=workbook, request_sheet_name=request_sheet_name)
 
-		first_row = _first_data_row(workbook=workbook, sheet_name=args.sheet_name)
-		payload = _build_payload(
-			request_id=request_id,
-			template_file_name=template_file.name,
-			request_info=request_info,
-			first_row=first_row,
-			platform=args.platform,
-			request_type=args.request_type,
-			environment=args.environment,
-			activity_type=args.activity_type,
-			access_for=args.access_for,
-			ad_group_name=args.ad_group_name,
-			service_account_name=args.service_account_name,
-			justification=args.justification,
-			additional_information=args.additional_information,
-		)
+			first_row = _first_data_row(workbook=workbook, sheet_name=args.sheet_name)
+			payload = _build_payload(
+				request_id=request_id,
+				template_file_name=template_file.name,
+				request_info=request_info,
+				first_row=first_row,
+				platform=args.platform,
+				request_type=args.request_type,
+				environment=args.environment,
+				activity_type=args.activity_type,
+				access_for=args.access_for,
+				ad_group_name=args.ad_group_name,
+				service_account_name=args.service_account_name,
+				justification=args.justification,
+				additional_information=args.additional_information,
+			)
+		finally:
+			if tmp_path:
+				try:
+					os.unlink(tmp_path)
+				except OSError:
+					pass
 
 		if args.yaml_template_file:
 			yaml_template_file = Path(args.yaml_template_file).resolve()

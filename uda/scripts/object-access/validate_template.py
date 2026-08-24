@@ -7,6 +7,7 @@ Terraform plan/apply execution.
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 import sys
 import tempfile
@@ -23,12 +24,6 @@ try:
 	from openpyxl import Workbook, load_workbook
 except ImportError as exc:  # pragma: no cover - runtime dependency
 	raise SystemExit("openpyxl is required. Install with: pip install openpyxl") from exc
-
-try:
-	import xlrd
-except ImportError:
-	xlrd = None
-
 
 REQUIRED_COLUMNS = [
 	"Environment",
@@ -210,7 +205,9 @@ def _load_workbook_compat(template_file: Path) -> tuple[Any, str | None]:
 	if template_file.suffix.lower() != ".xls":
 		raise ValueError("Template file must be .xlsx or .xls")
 
-	if xlrd is None:
+	try:
+		xlrd = importlib.import_module("xlrd")
+	except ModuleNotFoundError as exc:
 		raise SystemExit("xlrd is required for .xls support. Install with: pip install xlrd")
 
 	xls_book = xlrd.open_workbook(str(template_file))
