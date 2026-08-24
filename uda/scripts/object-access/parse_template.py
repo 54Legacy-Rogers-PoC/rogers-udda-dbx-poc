@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -19,8 +21,14 @@ except ImportError as exc:  # pragma: no cover - runtime dependency
 
 try:
 	from openpyxl import load_workbook
+	from openpyxl import Workbook
 except ImportError as exc:  # pragma: no cover - runtime dependency
 	raise SystemExit("openpyxl is required. Install with: pip install openpyxl") from exc
+
+try:
+	import xlrd
+except ImportError:
+	xlrd = None
 
 
 REQUIRED_COLUMNS = [
@@ -157,40 +165,75 @@ def _read_request_context(request_file: Path | None) -> dict[str, str]:
 	}
 
 
+def _load_workbook_compat(template_file: Path) -> tuple[Any, str | None]:
+	if template_file.suffix.lower() == ".xlsx":
+		return load_workbook(filename=template_file, data_only=True), None
+
+	if template_file.suffix.lower() != ".xls":
+		raise ValueError("Template file must be .xlsx or .xls")
+
+	if xlrd is None:
+		raise SystemExit("xlrd is required for .xls support. Install with: pip install xlrd")
+
+	xls_book = xlrd.open_workbook(str(template_file))
+	xlsx_book = Workbook()
+	xlsx_book.remove(xlsx_book.active)
+
+	for sheet_name in xls_book.sheet_names():
+		xls_sheet = xls_book.sheet_by_name(sheet_name)
+		xlsx_sheet = xlsx_book.create_sheet(title=sheet_name[:31] or "Sheet")
+		for row_idx in range(xls_sheet.nrows):
+			for col_idx in range(xls_sheet.ncols):
+				xlsx_sheet.cell(row=row_idx + 1, column=col_idx + 1, value=xls_sheet.cell_value(row_idx, col_idx))
+
+	with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as handle:
+		tmp_path = handle.name
+
+	xlsx_book.save(tmp_path)
+	return load_workbook(filename=tmp_path, data_only=True), tmp_path
+
+
 def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any]], list[str]]:
 	if not template_file.exists():
 		raise FileNotFoundError(f"Template file not found: {template_file}")
 
-	workbook = load_workbook(filename=template_file, data_only=True)
-	if sheet_name not in workbook.sheetnames:
-		raise ValueError(f"Worksheet not found: {sheet_name}")
+	workbook, tmp_path = _load_workbook_compat(template_file)
+	try:
+		if sheet_name not in workbook.sheetnames:
+			raise ValueError(f"Worksheet not found: {sheet_name}")
 
-	sheet = workbook[sheet_name]
-	header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
-	raw_headers = [_normalize(v) for v in (header_cells or [])]
-	if _header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
-		header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
+		sheet = workbook[sheet_name]
+		header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
 		raw_headers = [_normalize(v) for v in (header_cells or [])]
-		min_row = 3
-	else:
-		min_row = 2
-	headers = _canonical_headers(raw_headers)
+		if _header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
+			header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
+			raw_headers = [_normalize(v) for v in (header_cells or [])]
+			min_row = 3
+		else:
+			min_row = 2
+		headers = _canonical_headers(raw_headers)
 
-	is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
-	required_columns = COMPACT_REQUIRED_COLUMNS if is_compact_format else REQUIRED_COLUMNS
-	missing = [column for column in required_columns if column not in headers]
-	if missing:
-		raise ValueError(f"Missing required columns: {', '.join(missing)}")
+		is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
+		required_columns = COMPACT_REQUIRED_COLUMNS if is_compact_format else REQUIRED_COLUMNS
+		missing = [column for column in required_columns if column not in headers]
+		if missing:
+			raise ValueError(f"Missing required columns: {', '.join(missing)}")
 
-	rows: list[dict[str, Any]] = []
-	for row_idx, row_values in enumerate(sheet.iter_rows(min_row=min_row, values_only=True), start=min_row):
-		row_dict = {headers[i]: row_values[i] if i < len(row_values) else None for i in range(len(headers))}
-		if all(_is_blank(v) for v in row_dict.values()):
-			continue
-		row_dict["_row"] = row_idx
-		rows.append(row_dict)
+		rows: list[dict[str, Any]] = []
+		for row_idx, row_values in enumerate(sheet.iter_rows(min_row=min_row, values_only=True), start=min_row):
+			row_dict = {headers[i]: row_values[i] if i < len(row_values) else None for i in range(len(headers))}
+			if all(_is_blank(v) for v in row_dict.values()):
+				continue
+			row_dict["_row"] = row_idx
+			rows.append(row_dict)
 
-	return rows, headers
+		return rows, headers
+	finally:
+		if tmp_path:
+			try:
+				os.unlink(tmp_path)
+			except OSError:
+				pass
 
 
 def _normalize_row(row: dict[str, Any], request_context: dict[str, str]) -> dict[str, Any]:

@@ -152,6 +152,20 @@ def test_missing_template_returns_yml_008(tmp_path: Path) -> None:
 	assert "YML-008" in _error_codes(errors)
 
 
+def test_xls_template_extension_is_accepted(tmp_path: Path) -> None:
+	attachments_dir = tmp_path / "attachments"
+	attachments_dir.mkdir()
+	(attachments_dir / "ObjectAccessTemplate.xls").write_text("", encoding="utf-8")
+
+	payload = _valid_payload()
+	payload["template_file"] = "ObjectAccessTemplate.xls"
+	request_file = tmp_path / "RITM123456.yaml"
+	_write_yaml(request_file, payload)
+
+	errors = validator.validate_request_file(request_file, attachments_dir)
+	assert errors == []
+
+
 def test_blank_justification_returns_yml_009(tmp_path: Path) -> None:
 	attachments_dir = tmp_path / "attachments"
 	attachments_dir.mkdir()

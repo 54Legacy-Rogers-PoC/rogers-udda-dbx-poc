@@ -226,12 +226,12 @@ def _validate_template_file(payload: dict[str, Any], attachments_dir: Path) -> l
 		return errors
 
 	template_name = str(template_file)
-	if not template_name.lower().endswith(".xlsx"):
+	if not template_name.lower().endswith((".xlsx", ".xls")):
 		errors.append(
 			ValidationError(
 				code="YML-007",
 				field="template_file",
-				message="template_file must have .xlsx extension",
+				message="template_file must have .xlsx or .xls extension",
 			)
 		)
 		return errors
