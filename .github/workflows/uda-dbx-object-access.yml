@@ -246,8 +246,47 @@ jobs:
           resolved_path = attachments_dir / template_file
           print(f"Resolved template file: {resolved_path}")
 
+          requested_sheet = str(payload.get("object_list_sheet_name", "")).strip()
+
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write(f"template_file={resolved_path}\n")
+              out.write(f"requested_sheet={requested_sheet}\n")
+          PY
+
+      - name: Resolve object list worksheet name
+        id: resolve_sheet
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from openpyxl import load_workbook
+
+          template_path = Path("${{ steps.resolve_template.outputs.template_file }}")
+          requested_sheet = "${{ steps.resolve_template.outputs.requested_sheet }}".strip()
+
+          wb = load_workbook(template_path, data_only=True)
+          sheetnames = wb.sheetnames
+
+          candidate_order = []
+          if requested_sheet:
+            candidate_order.append(requested_sheet)
+          candidate_order.extend(["ObjectAccess", "Object List"])
+
+          resolved = ""
+          for candidate in candidate_order:
+            if candidate in sheetnames:
+              resolved = candidate
+              break
+
+          if not resolved:
+            raise SystemExit(
+              "Unable to resolve object list worksheet. "
+              f"Requested='{requested_sheet}'. Available sheets={sheetnames}"
+            )
+
+          print(f"Resolved object list worksheet: {resolved}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+            out.write(f"sheet_name={resolved}\n")
           PY
 
       - name: Validate request YAML
@@ -274,13 +313,15 @@ jobs:
         run: |
           python uda/scripts/object-access/validate_template.py \
             --template-file "${{ steps.resolve_template.outputs.template_file }}" \
-            --request-file "$REQUEST_FILE"
+            --request-file "$REQUEST_FILE" \
+            --sheet-name "${{ steps.resolve_sheet.outputs.sheet_name }}"
 
       - name: Parse object access template
         run: |
           python uda/scripts/object-access/parse_template.py \
             --template-file "${{ steps.resolve_template.outputs.template_file }}" \
             --request-file "$REQUEST_FILE" \
+            --sheet-name "${{ steps.resolve_sheet.outputs.sheet_name }}" \
             --output-file "$PARSED_JSON"
 
       - name: Generate tfvars JSON
