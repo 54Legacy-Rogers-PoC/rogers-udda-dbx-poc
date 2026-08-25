@@ -115,6 +115,13 @@ def _normalize_environment(value: str) -> str:
 	return mapped.get(upper, upper)
 
 
+def _normalize_principal_for_compare(value: str) -> str:
+	v = _normalize(value)
+	if "@" in v:
+		return v.lower()
+	return v
+
+
 def _normalize_activity(value: str) -> str:
 	mapped = {
 		"ADD": "ADD",
@@ -662,7 +669,7 @@ def _validate_cross_field_consistency(record: dict[str, Any], request_context: d
 	elif expected_access_for == "service_account":
 		expected_principal = request_context.get("service_account_name", "")
 
-	if expected_principal and row_principal and row_principal != expected_principal:
+	if expected_principal and row_principal and _normalize_principal_for_compare(row_principal) != _normalize_principal_for_compare(expected_principal):
 		errors.append(
 			ValidationError(
 				code="TPL-008",
