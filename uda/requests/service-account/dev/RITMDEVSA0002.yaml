@@ -1,0 +1,21 @@
+request_id: RITMDEVSA0002
+platform: databricks
+request_type: service_account
+environment: Development
+activity_type: remove_from_cluster
+service_account_type: Business
+service_account_name: SERV_DATA_FINANCE_PBI_DEV
+service_account_owner: Data Platform Team
+cluster_name: FINANCE_ANALYTICS_DEV
+cluster_permission_level: CAN_ATTACH_TO
+subscription: DMT DEV
+resource_group_name: RG-FINANCE-DEV
+workspace_name: DATABRICKS-DEV
+cluster_type: Shared
+cluster_owner: Data Platform Team
+cluster_scoa_department_name: Finance
+cluster_scoa_department_number: "1234567"
+department_scoa_number: "1234567"
+department_scoa_name: Finance
+justification: Remove service account cluster access in DEV
+additional_information: Service-account lifecycle request for remove_from_cluster in service-account workflow
