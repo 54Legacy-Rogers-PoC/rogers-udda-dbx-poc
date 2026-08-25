@@ -160,6 +160,101 @@ def _read_request_context(request_file: Path | None) -> dict[str, str]:
 	}
 
 
+def _is_placeholder(value: str) -> bool:
+	v = value.strip().lower()
+	return v.startswith("<enter") or v in {"na", "n/a", "-"}
+
+
+def _find_requestor_entry_col(sheet: Any) -> int | None:
+	for row in sheet.iter_rows(min_row=1, max_row=30, values_only=True):
+		for idx, cell in enumerate([_normalize(v) for v in row]):
+			if "requestor entry info" in _header_key(cell):
+				return idx
+	return None
+
+
+def _value_right_of_label(sheet: Any, label_matchers: list[str], requestor_col: int | None = None, prefer_email: bool = False) -> str:
+	for row in sheet.iter_rows(values_only=True):
+		row_values = [_normalize(v) for v in row]
+		for idx, cell in enumerate(row_values):
+			cell_key = _header_key(cell)
+			if any(m in cell_key for m in label_matchers):
+				if requestor_col is not None and requestor_col < len(row_values):
+					entry_val = row_values[requestor_col]
+					if entry_val and not _is_placeholder(entry_val):
+						if not prefer_email or "@" in entry_val:
+							return entry_val
+				for nxt in row_values[idx + 1 :]:
+					if nxt and not _is_placeholder(nxt):
+						if prefer_email and "@" not in nxt:
+							continue
+						return nxt
+	return ""
+
+
+def _read_workbook_context(template_file: Path) -> dict[str, str]:
+	workbook, tmp_path = _load_workbook_compat(template_file)
+	try:
+		environment = ""
+		activity_type = ""
+		ad_group_name = ""
+		service_account_name = ""
+
+		for sheet in workbook.worksheets:
+			requestor_col = _find_requestor_entry_col(sheet)
+			if not environment:
+				environment = _value_right_of_label(sheet, ["environment"], requestor_col=requestor_col)
+			if not activity_type:
+				activity_type = _value_right_of_label(sheet, ["request type", "activity"], requestor_col=requestor_col)
+			if not ad_group_name:
+				ad_group_name = _value_right_of_label(
+					sheet,
+					["dtb ad group name", "ad group name"],
+					requestor_col=requestor_col,
+					prefer_email=True,
+				)
+			if not service_account_name:
+				service_account_name = _value_right_of_label(
+					sheet,
+					["service account name"],
+					requestor_col=requestor_col,
+					prefer_email=True,
+				)
+
+			if environment and activity_type and (ad_group_name or service_account_name):
+				break
+
+		access_for = ""
+		principal_name = ""
+		if ad_group_name:
+			access_for = "ad_group"
+			principal_name = ad_group_name
+		elif service_account_name:
+			access_for = "service_account"
+			principal_name = service_account_name
+
+		return {
+			"environment": _normalize_environment(environment),
+			"access_for": access_for,
+			"activity_type": _normalize_activity(activity_type),
+			"principal_name": principal_name,
+		}
+	finally:
+		if tmp_path:
+			try:
+				os.unlink(tmp_path)
+			except OSError:
+				pass
+
+
+def _merge_context(primary: dict[str, str], fallback: dict[str, str]) -> dict[str, str]:
+	merged = dict(fallback)
+	for key, value in primary.items():
+		if _normalize(value):
+			merged[key] = value
+	return merged
+
+
 def _load_workbook_compat(template_file: Path) -> tuple[Any, str | None]:
 	# First try openpyxl regardless of file extension. This handles files whose
 	# extension is .xls but content is actually OOXML (.xlsx).
@@ -292,6 +387,8 @@ def parse_template_file(
 	sheet_name: str = "ObjectAccess",
 ) -> dict[str, Any]:
 	request_context = _read_request_context(request_file)
+	workbook_context = _read_workbook_context(template_file)
+	request_context = _merge_context(request_context, workbook_context)
 	rows, headers = _load_rows(template_file=template_file, sheet_name=sheet_name)
 	records = [_normalize_row(row, request_context) for row in rows]
 	request_id = request_context.get("request_id", "") or template_file.stem
