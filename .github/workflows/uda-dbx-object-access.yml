@@ -3,12 +3,12 @@ name: UDA Databricks Object Access
 on:
   push:
     branches:
-      - feature/furqan-udda
+      - "**"
     paths:
       - "uda/attachments/object-access/**"
   pull_request:
     branches:
-      - feature/furqan-udda
+      - "**"
     paths:
       - "uda/attachments/object-access/**"
   workflow_dispatch:
@@ -48,8 +48,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: uda-dbx-object-access-${{ github.ref }}
-  cancel-in-progress: true
+  group: uda-dbx-object-access-global
+  cancel-in-progress: false
 
 jobs:
   detect-templates:
@@ -803,104 +803,95 @@ jobs:
             exit 1
           fi
 
-          if [ "$REQUEST_ACTIVITY" != "MIXED" ] || grep -q "Saved plan is stale" "$apply_log"; then
+          if grep -q "Saved plan is stale" "$apply_log"; then
             echo "Saved plan is stale. Rebuilding plan from current state and retrying apply once..."
-          fi
 
-          if [ "$REQUEST_ACTIVITY" != "ADD" ] && grep -q "Saved plan is stale" "$apply_log"; then
-            declare -a TARGETS=()
-            declare -A TARGET_IMPORT_ID=()
+            if [ "$REQUEST_ACTIVITY" != "ADD" ]; then
+              declare -a TARGETS=()
+              declare -A TARGET_IMPORT_ID=()
 
-            while IFS=$'\t' read -r target import_id; do
-              if [ -z "$target" ] || [ -z "$import_id" ]; then
-                continue
-              fi
-              TARGETS+=("$target")
-              TARGET_IMPORT_ID["$target"]="$import_id"
-            done < <(jq -r '.object_access_records[]
-              | select((.activity | ascii_upcase) == "REMOVE")
-              | if ((.object_type | ascii_upcase) == "CATALOG") then
-                  [
-                    "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
-                    "catalog/\(.catalog)/\(.principal_name)"
-                  ]
-                elif ((.object_type | ascii_upcase) == "SCHEMA") then
-                  [
-                    "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
-                    "schema/\(.catalog).\(.schema)/\(.principal_name)"
-                  ]
-                elif ((.object_type | ascii_upcase) == "VIEW") then
-                  [
-                    "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
-                    "table/\(.catalog).\(.schema).\(.object_name)/\(.principal_name)"
-                  ]
-                else empty end
-              | @tsv' "$TFVARS_JSON")
-
-            if [ "${#TARGETS[@]}" -eq 0 ]; then
-              echo "No revoke targets found for REMOVE/REVOKE template." >&2
-              exit 1
-            fi
-
-            mapfile -t STATE_ADDRS < <(terraform -chdir=terraform state list || true)
-
-            target_args=()
-            missing_targets=()
-            for t in "${TARGETS[@]}"; do
-              if ! printf '%s\n' "${STATE_ADDRS[@]}" | grep -Fx -- "$t" >/dev/null; then
-                import_id="${TARGET_IMPORT_ID[$t]:-}"
-                if [ -n "$import_id" ]; then
-                  echo "Target not in state. Attempting import for revoke: $import_id"
-                  if terraform -chdir=terraform import -var-file="../$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
-                    echo "Imported missing target into state: $t"
-                    target_args+=("-target=$t")
-                    continue
-                  else
-                    echo "Import failed for target: $t"
-                  fi
+              while IFS=$'\t' read -r target import_id; do
+                if [ -z "$target" ] || [ -z "$import_id" ]; then
+                  continue
                 fi
-                missing_targets+=("$t")
-                continue
+                TARGETS+=("$target")
+                TARGET_IMPORT_ID["$target"]="$import_id"
+              done < <(jq -r '.object_access_records[]
+                | select((.activity | ascii_upcase) == "REMOVE")
+                | if ((.object_type | ascii_upcase) == "CATALOG") then
+                    [
+                      "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
+                      "catalog/\(.catalog)/\(.principal_name)"
+                    ]
+                  elif ((.object_type | ascii_upcase) == "SCHEMA") then
+                    [
+                      "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
+                      "schema/\(.catalog).\(.schema)/\(.principal_name)"
+                    ]
+                  elif ((.object_type | ascii_upcase) == "VIEW") then
+                    [
+                      "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
+                      "table/\(.catalog).\(.schema).\(.object_name)/\(.principal_name)"
+                    ]
+                  else empty end
+                | @tsv' "$TFVARS_JSON")
+
+              if [ "${#TARGETS[@]}" -eq 0 ]; then
+                echo "No revoke targets found for REMOVE/REVOKE template." >&2
+                exit 1
               fi
-              target_args+=("-target=$t")
-            done
 
-            if [ "${#missing_targets[@]}" -gt 0 ]; then
-              echo "Skipping revoke targets not found in backend state ($TF_BACKEND_KEY):"
-              printf ' - %s\n' "${missing_targets[@]}"
-              echo "Continuing with targets that are present in state."
-            fi
+              mapfile -t STATE_ADDRS < <(terraform -chdir=terraform state list || true)
 
-            if [ "${#target_args[@]}" -eq 0 ]; then
-              echo "No requested revoke targets exist in state. Creating refresh-only no-op plan."
-              terraform -chdir=terraform plan \
-                -lock-timeout=10m \
-                -refresh-only \
-                -var-file="../$TFVARS_JSON" \
-                -out="../$TFPLAN_BIN"
+              target_args=()
+              missing_targets=()
+              for t in "${TARGETS[@]}"; do
+                if ! printf '%s\n' "${STATE_ADDRS[@]}" | grep -Fx -- "$t" >/dev/null; then
+                  import_id="${TARGET_IMPORT_ID[$t]:-}"
+                  if [ -n "$import_id" ]; then
+                    echo "Target not in state. Attempting import for revoke: $import_id"
+                    if terraform -chdir=terraform import -var-file="../$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
+                      echo "Imported missing target into state: $t"
+                      target_args+=("-target=$t")
+                      continue
+                    else
+                      echo "Import failed for target: $t"
+                    fi
+                  fi
+                  missing_targets+=("$t")
+                  continue
+                fi
+                target_args+=("-target=$t")
+              done
+
+              if [ "${#missing_targets[@]}" -gt 0 ]; then
+                echo "Skipping revoke targets not found in backend state ($TF_BACKEND_KEY):"
+                printf ' - %s\n' "${missing_targets[@]}"
+                echo "Continuing with targets that are present in state."
+              fi
+
+              if [ "${#target_args[@]}" -eq 0 ]; then
+                echo "No requested revoke targets exist in state. Creating refresh-only no-op plan."
+                terraform -chdir=terraform plan \
+                  -lock-timeout=10m \
+                  -refresh-only \
+                  -var-file="../$TFVARS_JSON" \
+                  -out="../$TFPLAN_BIN"
+              else
+                terraform -chdir=terraform plan \
+                  -lock-timeout=10m \
+                  -destroy \
+                  -var-file="../$TFVARS_JSON" \
+                  "${target_args[@]}" \
+                  -out="../$TFPLAN_BIN"
+              fi
             else
               terraform -chdir=terraform plan \
                 -lock-timeout=10m \
-                -destroy \
                 -var-file="../$TFVARS_JSON" \
-                "${target_args[@]}" \
                 -out="../$TFPLAN_BIN"
             fi
-          else
-            terraform -chdir=terraform plan \
-              -lock-timeout=10m \
-              -var-file="../$TFVARS_JSON" \
-              -out="../$TFPLAN_BIN"
-          fi
 
-          if [ "$REQUEST_ACTIVITY" = "ADD" ] && grep -q "Saved plan is stale" "$apply_log"; then
-            terraform -chdir=terraform plan \
-              -lock-timeout=10m \
-              -var-file="../$TFVARS_JSON" \
-              -out="../$TFPLAN_BIN"
-          fi
-
-          if grep -q "Saved plan is stale" "$apply_log"; then
             terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
           fi
           fi

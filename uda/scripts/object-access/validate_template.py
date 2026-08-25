@@ -243,6 +243,8 @@ def _read_workbook_context(template_file: Path) -> dict[str, str]:
 
 		for sheet in workbook.worksheets:
 			requestor_col = _find_requestor_entry_col(sheet)
+			if requestor_col is None:
+				continue
 			if not environment:
 				environment = _value_right_of_label(sheet, ["environment"], requestor_col=requestor_col)
 			if not activity_type:
