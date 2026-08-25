@@ -294,9 +294,10 @@ def parse_template_file(
 	request_context = _read_request_context(request_file)
 	rows, headers = _load_rows(template_file=template_file, sheet_name=sheet_name)
 	records = [_normalize_row(row, request_context) for row in rows]
+	request_id = request_context.get("request_id", "") or template_file.stem
 
 	return {
-		"request_id": request_context.get("request_id", ""),
+		"request_id": request_id,
 		"sheet_name": sheet_name,
 		"header_columns": headers,
 		"record_count": len(records),

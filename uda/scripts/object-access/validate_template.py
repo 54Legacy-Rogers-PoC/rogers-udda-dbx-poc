@@ -33,7 +33,6 @@ REQUIRED_COLUMNS = [
 	"Catalog",
 	"Schema",
 	"Object_Name",
-	"Privilege",
 ]
 
 COMPACT_REQUIRED_COLUMNS = ["Activity", "Catalog", "Schema", "Object_Name"]
