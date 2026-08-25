@@ -4,7 +4,7 @@ request_type: service_account
 environment: Development
 activity_type: add_to_cluster
 service_account_type: Business
-service_account_name: SPN-GHA-DBX-MANOJ
+service_account_name: b862c4bf-d51a-43a7-b2c1-7ff4e7bd08cd
 service_account_owner: Data Platform Team
 cluster_name: FINANCE_ANALYTICS_DEV
 cluster_id: 0821-161748-z2lj0o0q
