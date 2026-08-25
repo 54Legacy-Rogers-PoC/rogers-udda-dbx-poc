@@ -189,6 +189,7 @@ jobs:
           echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
           echo "PARSED_JSON=$output_dir/parsed-object-access.json" >> "$GITHUB_ENV"
           echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
           echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
           echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
           echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
@@ -271,6 +272,38 @@ jobs:
           PY
           )"
           echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
+
+      - name: Build import tfvars for REMOVE targets
+        shell: bash
+        run: |
+          if [ "${REQUEST_ACTIVITY:-}" = "ADD" ]; then
+            echo "Import tfvars not needed for ADD-only request."
+            exit 0
+          fi
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          src = Path(os.environ["TFVARS_JSON"])
+          dst = Path(os.environ["TFVARS_IMPORT_JSON"])
+          payload = json.loads(src.read_text(encoding="utf-8"))
+          records = payload.get("object_access_records", [])
+
+          import_records = []
+          for r in records:
+              activity = str(r.get("activity", "")).strip().upper()
+              if activity in {"REMOVE", "REVOKE"}:
+                  rr = dict(r)
+                  rr["activity"] = "ADD"
+                  import_records.append(rr)
+
+          payload["object_access_records"] = import_records
+          dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+          print(f"Import tfvars written: {dst}")
+          print(f"Import target rows: {len(import_records)}")
+          PY
 
       - name: Azure login
         uses: azure/login@v2
@@ -413,10 +446,12 @@ jobs:
                 import_id="${TARGET_IMPORT_ID[$t]:-}"
                 if [ -n "$import_id" ]; then
                   echo "Target not in state. Attempting import for revoke: $import_id"
-                  if terraform -chdir=terraform import -var-file="../$TFVARS_JSON" "$t" "$import_id" >/dev/null 2>&1; then
+                  if terraform -chdir=terraform import -var-file="../$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
                     echo "Imported missing target into state: $t"
                     target_args+=("-target=$t")
                     continue
+                  else
+                    echo "Import failed for target: $t"
                   fi
                 fi
                 missing_targets+=("$t")
@@ -432,32 +467,37 @@ jobs:
             fi
 
             if [ "${#target_args[@]}" -eq 0 ]; then
-              echo "No requested revoke targets exist in state. Creating refresh-only no-op plan."
-              terraform -chdir=terraform plan \
-                -lock-timeout=10m \
-                -refresh-only \
-                -var-file="../$TFVARS_JSON" \
-                -out="../$TFPLAN_BIN"
               if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
+                echo "No requested revoke targets exist in state. Creating refresh-only no-op plan."
+                terraform -chdir=terraform plan \
+                  -lock-timeout=10m \
+                  -refresh-only \
+                  -var-file="../$TFVARS_JSON" \
+                  -out="../$TFPLAN_BIN"
                 terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
                 exit 0
+              else
+                echo "No REMOVE targets available for MIXED template. Skipping REMOVE phase and continuing to ADD plan."
+                echo "true" > "$OUTPUT_DIR/remove-phase-skipped.flag"
               fi
-            fi
+            else
+              terraform -chdir=terraform plan \
+                -lock-timeout=10m \
+                -destroy \
+                -var-file="../$TFVARS_JSON" \
+                "${target_args[@]}" \
+                -out="../$TFPLAN_BIN"
 
-            terraform -chdir=terraform plan \
-              -lock-timeout=10m \
-              -destroy \
-              -var-file="../$TFVARS_JSON" \
-              "${target_args[@]}" \
-              -out="../$TFPLAN_BIN"
+              terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
+            fi
           else
             terraform -chdir=terraform plan \
               -lock-timeout=10m \
               -var-file="../$TFVARS_JSON" \
               -out="../$TFPLAN_BIN"
-          fi
 
-          terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
+            terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
+          fi
 
           if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
             echo "Generating ADD phase plan for MIXED activity template..."
@@ -531,6 +571,7 @@ jobs:
           echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
           echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
           echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
           echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
           echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
@@ -572,6 +613,38 @@ jobs:
           PY
           )"
           echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
+
+      - name: Build import tfvars for REMOVE targets
+        shell: bash
+        run: |
+          if [ "${REQUEST_ACTIVITY:-}" = "ADD" ]; then
+            echo "Import tfvars not needed for ADD-only request."
+            exit 0
+          fi
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          src = Path(os.environ["TFVARS_JSON"])
+          dst = Path(os.environ["TFVARS_IMPORT_JSON"])
+          payload = json.loads(src.read_text(encoding="utf-8"))
+          records = payload.get("object_access_records", [])
+
+          import_records = []
+          for r in records:
+              activity = str(r.get("activity", "")).strip().upper()
+              if activity in {"REMOVE", "REVOKE"}:
+                  rr = dict(r)
+                  rr["activity"] = "ADD"
+                  import_records.append(rr)
+
+          payload["object_access_records"] = import_records
+          dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+          print(f"Import tfvars written: {dst}")
+          print(f"Import target rows: {len(import_records)}")
+          PY
 
       - name: Azure login
         uses: azure/login@v2
@@ -666,6 +739,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          REMOVE_PHASE_SKIPPED="false"
+          if [ "$REQUEST_ACTIVITY" = "MIXED" ] && [ -f "$OUTPUT_DIR/remove-phase-skipped.flag" ]; then
+            REMOVE_PHASE_SKIPPED="true"
+            echo "REMOVE phase was skipped during planning for MIXED template."
+          fi
+
+          if [ "$REQUEST_ACTIVITY" = "MIXED" ] && [ "$REMOVE_PHASE_SKIPPED" = "true" ]; then
+            echo "Skipping REMOVE apply phase and proceeding directly to ADD phase."
+          else
           apply_log="$(mktemp)"
 
           if terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN" 2>&1 | tee "$apply_log"; then
@@ -725,10 +807,12 @@ jobs:
                 import_id="${TARGET_IMPORT_ID[$t]:-}"
                 if [ -n "$import_id" ]; then
                   echo "Target not in state. Attempting import for revoke: $import_id"
-                  if terraform -chdir=terraform import -var-file="../$TFVARS_JSON" "$t" "$import_id" >/dev/null 2>&1; then
+                  if terraform -chdir=terraform import -var-file="../$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
                     echo "Imported missing target into state: $t"
                     target_args+=("-target=$t")
                     continue
+                  else
+                    echo "Import failed for target: $t"
                   fi
                 fi
                 missing_targets+=("$t")
@@ -774,6 +858,7 @@ jobs:
 
           if grep -q "Saved plan is stale" "$apply_log"; then
             terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+          fi
           fi
 
           if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
