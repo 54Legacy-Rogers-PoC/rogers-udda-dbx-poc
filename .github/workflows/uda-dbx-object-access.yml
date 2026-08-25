@@ -6,17 +6,11 @@ on:
       - "**"
     paths:
       - "uda/attachments/object-access/**"
-      - "uda/scripts/object-access/**"
-      - "terraform/**"
-      - ".github/workflows/uda-dbx-object-access.yml"
   pull_request:
     branches:
       - "**"
     paths:
       - "uda/attachments/object-access/**"
-      - "uda/scripts/object-access/**"
-      - "terraform/**"
-      - ".github/workflows/uda-dbx-object-access.yml"
   workflow_dispatch:
     inputs:
       template_file:
@@ -135,7 +129,7 @@ jobs:
             fi
           fi
 
-          mapfile -t changed_templates < <(git diff --name-only --diff-filter=ACMR "$base_sha" "$head_sha" -- "uda/attachments/object-access/*")
+          mapfile -t changed_templates < <(git diff --name-only --diff-filter=A "$base_sha" "$head_sha" -- "uda/attachments/object-access/*")
 
           existing_templates=()
           for f in "${changed_templates[@]}"; do
