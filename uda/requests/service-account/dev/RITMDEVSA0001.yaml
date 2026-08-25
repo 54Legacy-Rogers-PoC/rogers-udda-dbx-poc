@@ -14,8 +14,8 @@ workspace_name: DATABRICKS-DEV
 cluster_type: Shared
 cluster_owner: Data Platform Team
 cluster_scoa_department_name: Finance
-cluster_scoa_department_number: "123456"
-department_scoa_number: "123456"
+cluster_scoa_department_number: "1234567"
+department_scoa_number: "1234567"
 department_scoa_name: Finance
 justification: DEV validation for service account workflow
 additional_information: Sample DDD-DBX-01 request for workflow_dispatch
