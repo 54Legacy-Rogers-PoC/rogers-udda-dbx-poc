@@ -191,6 +191,8 @@ jobs:
           echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
           echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
           echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
+          echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
+          echo "TFPLAN_MIXED_ADD_TXT=$output_dir/object-access-add-plan.txt" >> "$GITHUB_ENV"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
           echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
 
@@ -260,10 +262,12 @@ jobs:
               else:
                   normalized.add(a)
 
-          if len(normalized) != 1:
-              raise SystemExit(f"Mixed activities are not supported in a single template. Found={sorted(normalized)}")
-
-          print(next(iter(normalized)))
+          if len(normalized) == 1:
+              print(next(iter(normalized)))
+          elif normalized == {"ADD", "REMOVE"}:
+              print("MIXED")
+          else:
+              raise SystemExit(f"Unsupported activity combination in a single template. Found={sorted(normalized)}")
           PY
           )"
           echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
@@ -364,7 +368,7 @@ jobs:
       - name: Terraform plan
         shell: bash
         run: |
-          if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
+          if [ "$REQUEST_ACTIVITY" != "ADD" ]; then
             declare -a TARGETS=()
             declare -A TARGET_IMPORT_ID=()
 
@@ -434,8 +438,10 @@ jobs:
                 -refresh-only \
                 -var-file="../$TFVARS_JSON" \
                 -out="../$TFPLAN_BIN"
-              terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
-              exit 0
+              if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
+                terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
+                exit 0
+              fi
             fi
 
             terraform -chdir=terraform plan \
@@ -453,6 +459,15 @@ jobs:
 
           terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
 
+          if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
+            echo "Generating ADD phase plan for MIXED activity template..."
+            terraform -chdir=terraform plan \
+              -lock-timeout=10m \
+              -var-file="../$TFVARS_JSON" \
+              -out="../$TFPLAN_MIXED_ADD_BIN"
+            terraform -chdir=terraform show -no-color "../$TFPLAN_MIXED_ADD_BIN" > "$TFPLAN_MIXED_ADD_TXT"
+          fi
+
       - name: Publish plan outputs
         if: always()
         uses: actions/upload-artifact@v4
@@ -468,7 +483,11 @@ jobs:
             echo "## Plan Result"
             echo "- Template file: $TEMPLATE_FILE"
             echo "- Output dir: $OUTPUT_DIR"
+            echo "- Request activity: $REQUEST_ACTIVITY"
             echo "- Plan text: $TFPLAN_TXT"
+            if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
+              echo "- Add plan text: $TFPLAN_MIXED_ADD_TXT"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   apply-object-access:
@@ -513,6 +532,7 @@ jobs:
           echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
           echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
           echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
+          echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
           echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
 
@@ -543,10 +563,12 @@ jobs:
               else:
                   normalized.add(a)
 
-          if len(normalized) != 1:
-              raise SystemExit(f"Mixed activities are not supported in a single template. Found={sorted(normalized)}")
-
-          print(next(iter(normalized)))
+          if len(normalized) == 1:
+              print(next(iter(normalized)))
+          elif normalized == {"ADD", "REMOVE"}:
+              print("MIXED")
+          else:
+              raise SystemExit(f"Unsupported activity combination in a single template. Found={sorted(normalized)}")
           PY
           )"
           echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
@@ -647,17 +669,19 @@ jobs:
           apply_log="$(mktemp)"
 
           if terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN" 2>&1 | tee "$apply_log"; then
-            exit 0
-          fi
-
-          if ! grep -q "Saved plan is stale" "$apply_log"; then
+            if [ "$REQUEST_ACTIVITY" != "MIXED" ]; then
+              exit 0
+            fi
+          elif ! grep -q "Saved plan is stale" "$apply_log"; then
             echo "Terraform apply failed for a reason other than stale plan." >&2
             exit 1
           fi
 
-          echo "Saved plan is stale. Rebuilding plan from current state and retrying apply once..."
+          if [ "$REQUEST_ACTIVITY" != "MIXED" ] || grep -q "Saved plan is stale" "$apply_log"; then
+            echo "Saved plan is stale. Rebuilding plan from current state and retrying apply once..."
+          fi
 
-          if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
+          if [ "$REQUEST_ACTIVITY" != "ADD" ] && grep -q "Saved plan is stale" "$apply_log"; then
             declare -a TARGETS=()
             declare -A TARGET_IMPORT_ID=()
 
@@ -741,4 +765,33 @@ jobs:
               -out="../$TFPLAN_BIN"
           fi
 
-          terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+          if [ "$REQUEST_ACTIVITY" = "ADD" ] && grep -q "Saved plan is stale" "$apply_log"; then
+            terraform -chdir=terraform plan \
+              -lock-timeout=10m \
+              -var-file="../$TFVARS_JSON" \
+              -out="../$TFPLAN_BIN"
+          fi
+
+          if grep -q "Saved plan is stale" "$apply_log"; then
+            terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+          fi
+
+          if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
+            echo "Starting ADD phase for MIXED activity template..."
+            add_apply_log="$(mktemp)"
+            if terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_MIXED_ADD_BIN" 2>&1 | tee "$add_apply_log"; then
+              exit 0
+            fi
+
+            if ! grep -q "Saved plan is stale" "$add_apply_log"; then
+              echo "ADD phase apply failed for a reason other than stale plan." >&2
+              exit 1
+            fi
+
+            echo "ADD phase plan is stale. Rebuilding and retrying once..."
+            terraform -chdir=terraform plan \
+              -lock-timeout=10m \
+              -var-file="../$TFVARS_JSON" \
+              -out="../$TFPLAN_MIXED_ADD_BIN"
+            terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_MIXED_ADD_BIN"
+          fi
