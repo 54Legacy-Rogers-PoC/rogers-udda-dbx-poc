@@ -3,12 +3,12 @@ name: UDA Databricks Object Access
 on:
   push:
     branches:
-      - "**"
+      - feature/furqan-udda
     paths:
       - "uda/attachments/object-access/**"
   pull_request:
     branches:
-      - "**"
+      - feature/furqan-udda
     paths:
       - "uda/attachments/object-access/**"
   workflow_dispatch:
