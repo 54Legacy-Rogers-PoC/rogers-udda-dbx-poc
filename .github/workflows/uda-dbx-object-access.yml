@@ -308,56 +308,11 @@ jobs:
           get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP TFSTATE-RESOURCE-GROUP-DBX-UDA
           get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
           get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
-          get_kv_secret TFSTATE_KEY_PREFIX_VALUE TFSTATE-KEY-PREFIX TFSTATE-KEY-ROOT TFSTATE-KEY-DBX TFSTATE-KEY
           get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
 
-          readarray -t KEY_PARTS < <(python - <<'PY'
-          import json
-          import os
-          import re
-          from pathlib import Path
+          TFSTATE_KEY_EFFECTIVE="addremove.tfstate"
 
-          payload = json.loads(Path(os.environ["TFVARS_JSON"]).read_text(encoding="utf-8"))
-          records = payload.get("object_access_records", [])
-
-          if not records:
-              raise SystemExit("No object_access_records found in tfvars")
-
-          envs = {str(r.get("environment", "")).strip().lower() for r in records if str(r.get("environment", "")).strip()}
-          access_types = {str(r.get("access_for", "")).strip().lower() for r in records if str(r.get("access_for", "")).strip()}
-          principals = {str(r.get("principal_name", "")).strip().lower() for r in records if str(r.get("principal_name", "")).strip()}
-
-          if len(envs) != 1 or len(access_types) != 1 or len(principals) != 1:
-              raise SystemExit(
-                  "Expected a single environment/access_for/principal per template. "
-                  f"Found env={sorted(envs)}, access_for={sorted(access_types)}, principal={sorted(principals)}"
-              )
-
-          def norm(v: str) -> str:
-              return re.sub(r"[^a-z0-9]+", "_", v).strip("_") or "unknown"
-
-          print(norm(next(iter(envs))))
-          print(norm(next(iter(access_types))))
-          print(norm(next(iter(principals))))
-          PY
-          )
-
-          KEY_ENV="${KEY_PARTS[0]:-unknown}"
-          KEY_ACCESS_FOR="${KEY_PARTS[1]:-unknown}"
-          KEY_PRINCIPAL="${KEY_PARTS[2]:-unknown}"
-
-          KEY_PREFIX="$TFSTATE_KEY_PREFIX_VALUE"
-          if [[ "$KEY_PREFIX" == *.tfstate ]]; then
-            KEY_PREFIX="${KEY_PREFIX%/*}"
-          fi
-          KEY_PREFIX="${KEY_PREFIX%/}"
-          if [ -z "$KEY_PREFIX" ]; then
-            KEY_PREFIX="databricks/object-access"
-          fi
-
-          TFSTATE_KEY_EFFECTIVE="$KEY_PREFIX/$KEY_ENV/$KEY_ACCESS_FOR/$KEY_PRINCIPAL.tfstate"
-
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_PREFIX_VALUE TFSTATE_ACCESS_KEY_VALUE; do
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
@@ -381,7 +336,7 @@ jobs:
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
-          echo "Derived backend key: $TFSTATE_KEY_EFFECTIVE"
+          echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
 
       - name: Terraform init (with retry)
         shell: bash
@@ -584,56 +539,11 @@ jobs:
           get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP TFSTATE-RESOURCE-GROUP-DBX-UDA
           get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
           get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
-          get_kv_secret TFSTATE_KEY_PREFIX_VALUE TFSTATE-KEY-PREFIX TFSTATE-KEY-ROOT TFSTATE-KEY-DBX TFSTATE-KEY
           get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
 
-          readarray -t KEY_PARTS < <(python - <<'PY'
-          import json
-          import os
-          import re
-          from pathlib import Path
+          TFSTATE_KEY_EFFECTIVE="addremove.tfstate"
 
-          payload = json.loads(Path(os.environ["TFVARS_JSON"]).read_text(encoding="utf-8"))
-          records = payload.get("object_access_records", [])
-
-          if not records:
-              raise SystemExit("No object_access_records found in tfvars")
-
-          envs = {str(r.get("environment", "")).strip().lower() for r in records if str(r.get("environment", "")).strip()}
-          access_types = {str(r.get("access_for", "")).strip().lower() for r in records if str(r.get("access_for", "")).strip()}
-          principals = {str(r.get("principal_name", "")).strip().lower() for r in records if str(r.get("principal_name", "")).strip()}
-
-          if len(envs) != 1 or len(access_types) != 1 or len(principals) != 1:
-              raise SystemExit(
-                  "Expected a single environment/access_for/principal per template. "
-                  f"Found env={sorted(envs)}, access_for={sorted(access_types)}, principal={sorted(principals)}"
-              )
-
-          def norm(v: str) -> str:
-              return re.sub(r"[^a-z0-9]+", "_", v).strip("_") or "unknown"
-
-          print(norm(next(iter(envs))))
-          print(norm(next(iter(access_types))))
-          print(norm(next(iter(principals))))
-          PY
-          )
-
-          KEY_ENV="${KEY_PARTS[0]:-unknown}"
-          KEY_ACCESS_FOR="${KEY_PARTS[1]:-unknown}"
-          KEY_PRINCIPAL="${KEY_PARTS[2]:-unknown}"
-
-          KEY_PREFIX="$TFSTATE_KEY_PREFIX_VALUE"
-          if [[ "$KEY_PREFIX" == *.tfstate ]]; then
-            KEY_PREFIX="${KEY_PREFIX%/*}"
-          fi
-          KEY_PREFIX="${KEY_PREFIX%/}"
-          if [ -z "$KEY_PREFIX" ]; then
-            KEY_PREFIX="databricks/object-access"
-          fi
-
-          TFSTATE_KEY_EFFECTIVE="$KEY_PREFIX/$KEY_ENV/$KEY_ACCESS_FOR/$KEY_PRINCIPAL.tfstate"
-
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_KEY_PREFIX_VALUE TFSTATE_ACCESS_KEY_VALUE; do
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
