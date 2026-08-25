@@ -170,7 +170,29 @@ jobs:
           python-version: "3.12"
 
       - name: Set up Terraform
+        id: setup_terraform_plan
+        continue-on-error: true
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Fallback install Terraform
+        if: steps.setup_terraform_plan.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TF_VERSION="1.9.8"
+          curl --proto '=https' --proto-redir '=https' -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip
+          unzip -o /tmp/terraform.zip -d /tmp
+          mkdir -p "$HOME/bin"
+          mv /tmp/terraform "$HOME/bin/terraform"
+          chmod +x "$HOME/bin/terraform"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Terraform
+        shell: bash
+        run: terraform version
 
       - name: Install workflow dependencies
         run: |
@@ -558,7 +580,29 @@ jobs:
           pip install pyyaml openpyxl xlrd
 
       - name: Set up Terraform
+        id: setup_terraform_apply
+        continue-on-error: true
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Fallback install Terraform
+        if: steps.setup_terraform_apply.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TF_VERSION="1.9.8"
+          curl --proto '=https' --proto-redir '=https' -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip
+          unzip -o /tmp/terraform.zip -d /tmp
+          mkdir -p "$HOME/bin"
+          mv /tmp/terraform "$HOME/bin/terraform"
+          chmod +x "$HOME/bin/terraform"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Terraform
+        shell: bash
+        run: terraform version
 
       - name: Prepare output paths
         id: prep_paths
