@@ -4,7 +4,7 @@ request_type: service_account
 environment: Development
 activity_type: add_to_cluster
 service_account_type: Business
-service_account_name: d837c5ea-e242-43ed-a380-11af005a9d36
+service_account_name: Spn-Service-Account
 service_account_owner: Data Platform Team
 cluster_name: FINANCE_ANALYTICS_DEV
 cluster_id: 0821-161748-z2lj0o0q
