@@ -41,6 +41,28 @@ def merge_context(primary: dict[str, str], fallback: dict[str, str]) -> dict[str
     return merged
 
 
+def extract_headers_and_start_row(
+    sheet: Any,
+    canonicalize_headers: Callable[[list[str]], Any],
+) -> tuple[Any, int]:
+    header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    raw_headers = [normalize(v) for v in (header_cells or [])]
+    if header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
+        header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
+        raw_headers = [normalize(v) for v in (header_cells or [])]
+        return canonicalize_headers(raw_headers), 3
+    return canonicalize_headers(raw_headers), 2
+
+
+def select_required_columns(
+    headers: list[str],
+    compact_required_columns: list[str],
+    required_columns: list[str],
+) -> list[str]:
+    is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
+    return compact_required_columns if is_compact_format else required_columns
+
+
 def load_workbook_compat(template_file: Path) -> tuple[Any, str | None]:
     # First try openpyxl regardless of file extension. This handles files whose
     # extension is .xls but content is actually OOXML (.xlsx).

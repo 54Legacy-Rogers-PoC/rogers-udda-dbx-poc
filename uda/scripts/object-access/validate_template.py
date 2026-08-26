@@ -7,7 +7,6 @@ Terraform plan/apply execution.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import sys
 from dataclasses import dataclass
@@ -19,28 +18,23 @@ try:
 except ImportError as exc:  # pragma: no cover - runtime dependency
 	raise SystemExit("PyYAML is required. Install with: pip install pyyaml") from exc
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+	sys.path.insert(0, str(SCRIPT_DIR))
+
 try:
 	from template_common import (  # pylint: disable=import-error
+		extract_headers_and_start_row,
 		header_key,
 		load_workbook_compat,
 		merge_context,
 		normalize,
 		normalize_environment,
 		read_workbook_context,
+		select_required_columns,
 	)
-except ImportError:  # pragma: no cover - runtime dependency
-	module_path = Path(__file__).with_name("template_common.py")
-	spec = importlib.util.spec_from_file_location("template_common", module_path)
-	if spec is None or spec.loader is None:
-		raise SystemExit("Shared helpers are missing. Ensure template_common.py is present.")
-	module = importlib.util.module_from_spec(spec)
-	spec.loader.exec_module(module)
-	header_key = module.header_key
-	load_workbook_compat = module.load_workbook_compat
-	merge_context = module.merge_context
-	normalize = module.normalize
-	normalize_environment = module.normalize_environment
-	read_workbook_context = module.read_workbook_context
+except ImportError as exc:  # pragma: no cover - runtime dependency
+	raise SystemExit("Shared helpers are missing. Ensure template_common.py is present.") from exc
 
 REQUIRED_COLUMNS = [
 	"Environment",
@@ -231,23 +225,6 @@ def _build_unreadable_error(exc: Exception) -> list[ValidationError]:
 	]
 
 
-def _extract_headers_and_start_row(sheet: Any) -> tuple[list[str], int]:
-	header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
-	raw_headers = [normalize(v) for v in (header_cells or [])]
-	if header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
-		header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
-		raw_headers = [normalize(v) for v in (header_cells or [])]
-		headers, _ = _canonical_headers(raw_headers)
-		return headers, 3
-	headers, _ = _canonical_headers(raw_headers)
-	return headers, 2
-
-
-def _compute_required_columns(headers: list[str]) -> list[str]:
-	is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
-	return COMPACT_REQUIRED_COLUMNS if is_compact_format else REQUIRED_COLUMNS
-
-
 def _build_missing_columns_error(missing: list[str]) -> list[ValidationError]:
 	return [
 		ValidationError(
@@ -280,8 +257,8 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 			]
 
 		sheet = workbook[sheet_name]
-		headers, min_row = _extract_headers_and_start_row(sheet)
-		required_columns = _compute_required_columns(headers)
+		headers, min_row = extract_headers_and_start_row(sheet, _canonical_headers)
+		required_columns = select_required_columns(headers, COMPACT_REQUIRED_COLUMNS, REQUIRED_COLUMNS)
 		missing = [c for c in required_columns if c not in headers]
 		if missing:
 			return [], _build_missing_columns_error(missing)
