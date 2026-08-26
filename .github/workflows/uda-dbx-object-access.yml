@@ -579,20 +579,6 @@ jobs:
           if [ "$REQUEST_ACTIVITY" = "MIXED" ] && [ "$REMOVE_PHASE_SKIPPED" = "true" ]; then
             echo "Skipping REMOVE apply phase and proceeding directly to ADD phase."
           else
-          apply_log="$(mktemp)"
-
-          if terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN" 2>&1 | tee "$apply_log"; then
-            if [ "$REQUEST_ACTIVITY" != "MIXED" ]; then
-              exit 0
-            fi
-          elif ! grep -q "Saved plan is stale" "$apply_log"; then
-            echo "Terraform apply failed for a reason other than stale plan." >&2
-            exit 1
-          fi
-
-          if grep -q "Saved plan is stale" "$apply_log"; then
-            echo "Saved plan is stale. Rebuilding plan from current state and retrying apply once..."
-
             if [ "$REQUEST_ACTIVITY" != "ADD" ]; then
               declare -a TARGETS=()
               declare -A TARGET_IMPORT_ID=()
@@ -658,12 +644,18 @@ jobs:
               fi
 
               if [ "${#target_args[@]}" -eq 0 ]; then
-                echo "No requested revoke targets exist in state. Creating refresh-only no-op plan."
-                terraform -chdir=terraform plan \
-                  -lock-timeout=10m \
-                  -refresh-only \
-                  -var-file="../$TFVARS_JSON" \
-                  -out="../$TFPLAN_BIN"
+                if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
+                  echo "No requested revoke targets exist in state. Creating refresh-only no-op plan."
+                  terraform -chdir=terraform plan \
+                    -lock-timeout=10m \
+                    -refresh-only \
+                    -var-file="../$TFVARS_JSON" \
+                    -out="../$TFPLAN_BIN"
+                  terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+                  exit 0
+                fi
+
+                echo "No REMOVE targets available for MIXED template. Skipping REMOVE phase and continuing to ADD phase."
               else
                 terraform -chdir=terraform plan \
                   -lock-timeout=10m \
@@ -671,31 +663,24 @@ jobs:
                   -var-file="../$TFVARS_JSON" \
                   "${target_args[@]}" \
                   -out="../$TFPLAN_BIN"
+                terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+
+                if [ "$REQUEST_ACTIVITY" != "MIXED" ]; then
+                  exit 0
+                fi
               fi
             else
               terraform -chdir=terraform plan \
                 -lock-timeout=10m \
                 -var-file="../$TFVARS_JSON" \
                 -out="../$TFPLAN_BIN"
+              terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+              exit 0
             fi
-
-            terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
-          fi
           fi
 
           if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
             echo "Starting ADD phase for MIXED activity template..."
-            add_apply_log="$(mktemp)"
-            if terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_MIXED_ADD_BIN" 2>&1 | tee "$add_apply_log"; then
-              exit 0
-            fi
-
-            if ! grep -q "Saved plan is stale" "$add_apply_log"; then
-              echo "ADD phase apply failed for a reason other than stale plan." >&2
-              exit 1
-            fi
-
-            echo "ADD phase plan is stale. Rebuilding and retrying once..."
             terraform -chdir=terraform plan \
               -lock-timeout=10m \
               -var-file="../$TFVARS_JSON" \
