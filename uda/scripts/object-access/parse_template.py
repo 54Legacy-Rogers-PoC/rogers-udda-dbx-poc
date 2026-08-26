@@ -192,53 +192,72 @@ def _value_right_of_label(sheet: Any, label_matchers: list[str], requestor_col: 
 	return ""
 
 
+def _extract_sheet_context(sheet: Any, requestor_col: int) -> dict[str, str]:
+	return {
+		"environment": _value_right_of_label(sheet, ["environment"], requestor_col=requestor_col),
+		"activity_type": _value_right_of_label(sheet, ["request type", "activity"], requestor_col=requestor_col),
+		"ad_group_name": _value_right_of_label(
+			sheet,
+			["dtb ad group name", "ad group name"],
+			requestor_col=requestor_col,
+			prefer_email=True,
+		),
+		"service_account_name": _value_right_of_label(
+			sheet,
+			["service account name"],
+			requestor_col=requestor_col,
+			prefer_email=True,
+		),
+	}
+
+
+def _merge_context_values(current: dict[str, str], found: dict[str, str]) -> None:
+	for key, value in found.items():
+		if not current[key] and value:
+			current[key] = value
+
+
+def _has_complete_context(context_values: dict[str, str]) -> bool:
+	return bool(
+		context_values["environment"]
+		and context_values["activity_type"]
+		and (context_values["ad_group_name"] or context_values["service_account_name"])
+	)
+
+
 def _read_workbook_context(template_file: Path) -> dict[str, str]:
 	workbook, tmp_path = _load_workbook_compat(template_file)
 	try:
-		environment = ""
-		activity_type = ""
-		ad_group_name = ""
-		service_account_name = ""
+		context_values = {
+			"environment": "",
+			"activity_type": "",
+			"ad_group_name": "",
+			"service_account_name": "",
+		}
 
 		for sheet in workbook.worksheets:
 			requestor_col = _find_requestor_entry_col(sheet)
 			if requestor_col is None:
 				continue
-			if not environment:
-				environment = _value_right_of_label(sheet, ["environment"], requestor_col=requestor_col)
-			if not activity_type:
-				activity_type = _value_right_of_label(sheet, ["request type", "activity"], requestor_col=requestor_col)
-			if not ad_group_name:
-				ad_group_name = _value_right_of_label(
-					sheet,
-					["dtb ad group name", "ad group name"],
-					requestor_col=requestor_col,
-					prefer_email=True,
-				)
-			if not service_account_name:
-				service_account_name = _value_right_of_label(
-					sheet,
-					["service account name"],
-					requestor_col=requestor_col,
-					prefer_email=True,
-				)
+			found = _extract_sheet_context(sheet, requestor_col)
+			_merge_context_values(context_values, found)
 
-			if environment and activity_type and (ad_group_name or service_account_name):
+			if _has_complete_context(context_values):
 				break
 
 		access_for = ""
 		principal_name = ""
-		if ad_group_name:
+		if context_values["ad_group_name"]:
 			access_for = "ad_group"
-			principal_name = ad_group_name
-		elif service_account_name:
+			principal_name = context_values["ad_group_name"]
+		elif context_values["service_account_name"]:
 			access_for = "service_account"
-			principal_name = service_account_name
+			principal_name = context_values["service_account_name"]
 
 		return {
-			"environment": _normalize_environment(environment),
+			"environment": _normalize_environment(context_values["environment"]),
 			"access_for": access_for,
-			"activity_type": _normalize_activity(activity_type),
+			"activity_type": _normalize_activity(context_values["activity_type"]),
 			"principal_name": principal_name,
 		}
 	finally:

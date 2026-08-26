@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 
@@ -35,10 +36,30 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _resolve_repo_json_path(path_input: str, *, must_exist: bool) -> Path:
+    repo_root = Path.cwd().resolve()
+    raw_path = Path(path_input)
+    resolved = (repo_root / raw_path).resolve() if not raw_path.is_absolute() else raw_path.resolve()
+
+    if repo_root != resolved and repo_root not in resolved.parents:
+        raise ValueError(f"Path escapes workspace root: {path_input}")
+    if resolved.suffix.lower() != ".json":
+        raise ValueError(f"Path must use .json extension: {path_input}")
+    if must_exist and not resolved.is_file():
+        raise ValueError(f"Input file not found: {path_input}")
+    return resolved
+
+
 def main() -> int:
     args = parse_args()
-    src = Path(args.input_json).resolve()
-    dst = Path(args.output_json).resolve()
+    try:
+        src = _resolve_repo_json_path(args.input_json, must_exist=True)
+        dst = _resolve_repo_json_path(args.output_json, must_exist=False)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
     count = build_import_tfvars(src, dst)
     print(f"Import tfvars written: {dst}")
     print(f"Import target rows: {count}")
