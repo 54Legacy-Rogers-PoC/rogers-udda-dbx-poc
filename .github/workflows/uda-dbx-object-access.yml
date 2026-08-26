@@ -70,11 +70,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
     env:
       TEMPLATE_FILE: ${{ matrix.template_file }}
       OUTPUT_ROOT: uda/output/object-access
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
     steps:
       - name: Checkout repository
@@ -98,31 +99,25 @@ jobs:
 
           get_kv_secret() {
             local out_var="$1"
-            shift
-            local names=("$@")
-            local value=""
-            for secret_name in "${names[@]}"; do
-              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
-              if [ -n "$value" ]; then
-                printf -v "$out_var" '%s' "$value"
-                return 0
-              fi
-            done
-            echo "Missing Key Vault secret. Tried names: ${names[*]}" >&2
-            exit 1
+            local secret_name="$2"
+            local value
+            value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
+            if [ -z "$value" ]; then
+              echo "Missing Key Vault secret: $secret_name" >&2
+              exit 1
+            fi
+            printf -v "$out_var" '%s' "$value"
           }
 
-          get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST DB-HOST
+          get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
-          get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID DATABRICKS-CLIENT-ID
-          get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET DATABRICKS-CLIENT-SECRET
-          get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID DATABRICKS-TENANT-ID
-          get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP TFSTATE-RESOURCE-GROUP-DBX-UDA
-          get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
-          get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
-          get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
-
-          TFSTATE_KEY_EFFECTIVE="addremove.tfstate"
+          get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID
+          get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET
+          get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID
+          get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP
+          get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT
+          get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA
+          get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
@@ -141,19 +136,20 @@ jobs:
           echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
-          echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE" >> "$GITHUB_ENV"
 
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
-          echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
+          echo "Backend key will be derived per request id."
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: uda/scripts/object-access/requirements-ci.txt
 
       - name: Set up Terraform
         id: setup_terraform_plan
@@ -164,8 +160,7 @@ jobs:
 
       - name: Install workflow dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install --only-binary=:all: pyyaml==6.0.2 openpyxl==3.1.5 xlrd==2.0.1
+          pip install --only-binary=:all: -r uda/scripts/object-access/requirements-ci.txt
 
       - name: Prepare output paths
         id: prep_paths
@@ -173,9 +168,12 @@ jobs:
         run: |
           template_name="$(basename "$TEMPLATE_FILE")"
           request_id="${template_name%.*}"
+          request_slug="$(echo "$request_id" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9._-' '-')"
+          tfstate_key="object-access/${request_slug}.tfstate"
           output_dir="$OUTPUT_ROOT/$request_id"
           mkdir -p "$output_dir"
           echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_KEY=$tfstate_key" >> "$GITHUB_ENV"
           echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
           echo "PARSED_JSON=$output_dir/parsed-object-access.json" >> "$GITHUB_ENV"
           echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
@@ -185,6 +183,7 @@ jobs:
           echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
           echo "TFPLAN_MIXED_ADD_TXT=$output_dir/object-access-add-plan.txt" >> "$GITHUB_ENV"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "tfstate_key=$tfstate_key" >> "$GITHUB_OUTPUT"
           echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
 
       - name: Validate object access template
@@ -419,31 +418,25 @@ jobs:
 
           get_kv_secret() {
             local out_var="$1"
-            shift
-            local names=("$@")
-            local value=""
-            for secret_name in "${names[@]}"; do
-              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
-              if [ -n "$value" ]; then
-                printf -v "$out_var" '%s' "$value"
-                return 0
-              fi
-            done
-            echo "Missing Key Vault secret. Tried names: ${names[*]}" >&2
-            exit 1
+            local secret_name="$2"
+            local value
+            value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
+            if [ -z "$value" ]; then
+              echo "Missing Key Vault secret: $secret_name" >&2
+              exit 1
+            fi
+            printf -v "$out_var" '%s' "$value"
           }
 
-          get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST DB-HOST
+          get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
-          get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID DATABRICKS-CLIENT-ID
-          get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET DATABRICKS-CLIENT-SECRET
-          get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID DATABRICKS-TENANT-ID
-          get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP TFSTATE-RESOURCE-GROUP-DBX-UDA
-          get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
-          get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
-          get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
-
-          TFSTATE_KEY_EFFECTIVE="addremove.tfstate"
+          get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID
+          get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET
+          get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID
+          get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP
+          get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT
+          get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA
+          get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
@@ -462,14 +455,13 @@ jobs:
           echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
-          echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE" >> "$GITHUB_ENV"
 
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
-          echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
+          echo "Backend key will be derived per request id."
 
       - name: Set up Terraform
         id: setup_terraform_apply
@@ -484,15 +476,19 @@ jobs:
         run: |
           template_name="$(basename "$TEMPLATE_FILE")"
           request_id="${template_name%.*}"
+          request_slug="$(echo "$request_id" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9._-' '-')"
+          tfstate_key="object-access/${request_slug}.tfstate"
           output_dir="$OUTPUT_ROOT/$request_id"
           mkdir -p "$output_dir"
           echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_KEY=$tfstate_key" >> "$GITHUB_ENV"
           echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
           echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
           echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
           echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
           echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "tfstate_key=$tfstate_key" >> "$GITHUB_OUTPUT"
           echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
 
       - name: Download plan outputs
