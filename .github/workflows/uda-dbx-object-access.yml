@@ -15,23 +15,12 @@ on:
     inputs:
       template_file:
         description: Path to a single Excel template file
-        required: false
-        default: ""
+        required: true
         type: string
       template_files:
         description: Optional comma or newline separated Excel template paths
         required: false
         default: ""
-        type: string
-      attachments_dir:
-        description: Directory containing template attachments
-        required: true
-        default: uda/attachments/object-access
-        type: string
-      output_dir:
-        description: Directory to write parsed/tfvars/plan outputs
-        required: true
-        default: uda/output/object-access
         type: string
       run_plan:
         description: Run Terraform plan stage
@@ -41,7 +30,7 @@ on:
       run_apply:
         description: Run Terraform apply stage
         required: true
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -70,263 +59,26 @@ jobs:
         env:
           TEMPLATE_FILE_INPUT: ${{ inputs.template_file }}
           TEMPLATE_FILES_INPUT: ${{ inputs.template_files }}
-          ATTACHMENTS_DIR_INPUT: ${{ inputs.attachments_dir }}
+          BASE_SHA_EVENT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA_EVENT: ${{ github.sha }}
         run: |
-          set -euo pipefail
+          bash uda/scripts/object-access/collect_template_files.sh
 
-          is_excel() {
-            case "${1,,}" in
-              *.xlsx|*.xlsm|*.xls) return 0 ;;
-              *) return 1 ;;
-            esac
-          }
-
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            template_files_raw="${TEMPLATE_FILES_INPUT:-}"
-            single_template="${TEMPLATE_FILE_INPUT:-}"
-            attachments_dir="${ATTACHMENTS_DIR_INPUT:-uda/attachments/object-access}"
-
-            if [ -n "$template_files_raw" ]; then
-              mapfile -t requested_templates < <(printf '%s\n' "$template_files_raw" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | awk '!seen[$0]++')
-            elif [ -n "$single_template" ]; then
-              requested_templates=("$single_template")
-            else
-              mapfile -t requested_templates < <(find "$attachments_dir" -maxdepth 1 -type f \( -name '*.xlsx' -o -name '*.xlsm' -o -name '*.xls' \) | sed 's#^./##')
-            fi
-
-            if [ "${#requested_templates[@]}" -eq 0 ]; then
-              echo "No template files found for workflow_dispatch." >&2
-              exit 1
-            fi
-
-            valid_templates=()
-            for f in "${requested_templates[@]}"; do
-              if [ ! -f "$f" ]; then
-                echo "Requested template not found: $f" >&2
-                exit 1
-              fi
-              if ! is_excel "$f"; then
-                echo "Unsupported template extension (expected .xlsx/.xlsm/.xls): $f" >&2
-                exit 1
-              fi
-              valid_templates+=("$f")
-            done
-
-            matrix_json="$(python -c "import json,sys; print(json.dumps({'include':[{'template_file':f} for f in sys.argv[1:] if f]}))" "${valid_templates[@]}")"
-            echo "has_templates=true" >> "$GITHUB_OUTPUT"
-            echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            base_sha="${{ github.event.pull_request.base.sha }}"
-            head_sha="${{ github.sha }}"
-          else
-            base_sha="${{ github.event.before }}"
-            head_sha="${{ github.sha }}"
-            if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
-              base_sha="$(git rev-parse HEAD~1)"
-            fi
-          fi
-
-          mapfile -t changed_templates < <(git diff --name-only --diff-filter=A "$base_sha" "$head_sha" -- "uda/attachments/object-access/*")
-
-          existing_templates=()
-          for f in "${changed_templates[@]}"; do
-            if [ -f "$f" ] && is_excel "$f"; then
-              existing_templates+=("$f")
-            fi
-          done
-
-          if [ "${#existing_templates[@]}" -eq 0 ]; then
-            echo "has_templates=false" >> "$GITHUB_OUTPUT"
-            echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          matrix_json="$(python -c "import json,sys; print(json.dumps({'include':[{'template_file':f} for f in sys.argv[1:] if f]}))" "${existing_templates[@]}")"
-          echo "has_templates=true" >> "$GITHUB_OUTPUT"
-          echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
-
-  plan-object-access:
+  load-runtime-secrets:
     needs: detect-templates
-    if: ${{ needs.detect-templates.outputs.has_templates == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
+    if: ${{ needs.detect-templates.outputs.has_templates == 'true' }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
-    env:
-      TEMPLATE_FILE: ${{ matrix.template_file }}
-      OUTPUT_ROOT: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
+    outputs:
+      databricks_host: ${{ steps.kv.outputs.databricks_host }}
+      databricks_client_id: ${{ steps.kv.outputs.databricks_client_id }}
+      databricks_client_secret: ${{ steps.kv.outputs.databricks_client_secret }}
+      tf_backend_resource_group_name: ${{ steps.kv.outputs.tf_backend_resource_group_name }}
+      tf_backend_storage_account_name: ${{ steps.kv.outputs.tf_backend_storage_account_name }}
+      tf_backend_container_name: ${{ steps.kv.outputs.tf_backend_container_name }}
+      tf_backend_access_key: ${{ steps.kv.outputs.tf_backend_access_key }}
+      tf_backend_key: ${{ steps.kv.outputs.tf_backend_key }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Terraform
-        id: setup_terraform_plan
-        continue-on-error: true
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.8
-          terraform_wrapper: false
-
-      - name: Fallback install Terraform
-        if: steps.setup_terraform_plan.outcome == 'failure'
-        shell: bash
-        run: |
-          set -euo pipefail
-          TF_VERSION="1.9.8"
-          curl --proto '=https' --proto-redir '=https' -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip
-          unzip -o /tmp/terraform.zip -d /tmp
-          mkdir -p "$HOME/bin"
-          mv /tmp/terraform "$HOME/bin/terraform"
-          chmod +x "$HOME/bin/terraform"
-          echo "$HOME/bin" >> "$GITHUB_PATH"
-
-      - name: Verify Terraform
-        shell: bash
-        run: terraform version
-
-      - name: Install workflow dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml openpyxl xlrd
-
-      - name: Prepare output paths
-        id: prep_paths
-        shell: bash
-        run: |
-          template_name="$(basename "$TEMPLATE_FILE")"
-          request_id="${template_name%.*}"
-          output_dir="$OUTPUT_ROOT/$request_id"
-          mkdir -p "$output_dir"
-          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
-          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
-          echo "PARSED_JSON=$output_dir/parsed-object-access.json" >> "$GITHUB_ENV"
-          echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
-          echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
-          echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
-          echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
-          echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
-          echo "TFPLAN_MIXED_ADD_TXT=$output_dir/object-access-add-plan.txt" >> "$GITHUB_ENV"
-          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
-          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve object list worksheet name
-        id: resolve_sheet
-        shell: bash
-        run: |
-          SHEET_NAME="$(python - <<'PY'
-          import os
-          from pathlib import Path
-          from openpyxl import load_workbook
-
-          template_path = Path(os.environ["TEMPLATE_FILE"])
-          wb = load_workbook(template_path, data_only=True)
-          sheetnames = wb.sheetnames
-
-          for candidate in ["ObjectAccess", "Object List"]:
-              if candidate in sheetnames:
-                  print(candidate)
-                  raise SystemExit(0)
-
-          raise SystemExit(
-              "Unable to resolve worksheet. Expected one of ['ObjectAccess', 'Object List']. "
-              f"Available sheets={sheetnames}"
-          )
-          PY
-          )"
-          echo "sheet_name=$SHEET_NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Validate object access template
-        run: |
-          python uda/scripts/object-access/validate_template.py \
-            --template-file "$TEMPLATE_FILE" \
-            --sheet-name "${{ steps.resolve_sheet.outputs.sheet_name }}"
-
-      - name: Parse object access template
-        run: |
-          python uda/scripts/object-access/parse_template.py \
-            --template-file "$TEMPLATE_FILE" \
-            --sheet-name "${{ steps.resolve_sheet.outputs.sheet_name }}" \
-            --output-file "$PARSED_JSON"
-
-      - name: Generate tfvars JSON
-        run: |
-          python uda/scripts/object-access/generate_tfvars.py \
-            --input-json "$PARSED_JSON" \
-            --output-json "$TFVARS_JSON"
-
-      - name: Determine request activity from parsed rows
-        shell: bash
-        run: |
-          REQUEST_ACTIVITY="$(python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          payload = json.loads(Path(os.environ["TFVARS_JSON"]).read_text(encoding="utf-8"))
-          activities = sorted({str(r.get("activity", "")).strip().upper() for r in payload.get("object_access_records", []) if str(r.get("activity", "")).strip()})
-
-          if not activities:
-              raise SystemExit("No activity found in parsed template rows")
-
-          normalized = set()
-          for a in activities:
-              if a == "REVOKE":
-                  normalized.add("REMOVE")
-              else:
-                  normalized.add(a)
-
-          if len(normalized) == 1:
-              print(next(iter(normalized)))
-          elif normalized == {"ADD", "REMOVE"}:
-              print("MIXED")
-          else:
-              raise SystemExit(f"Unsupported activity combination in a single template. Found={sorted(normalized)}")
-          PY
-          )"
-          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
-
-      - name: Build import tfvars for REMOVE targets
-        shell: bash
-        run: |
-          if [ "${REQUEST_ACTIVITY:-}" = "ADD" ]; then
-            echo "Import tfvars not needed for ADD-only request."
-            exit 0
-          fi
-
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          src = Path(os.environ["TFVARS_JSON"])
-          dst = Path(os.environ["TFVARS_IMPORT_JSON"])
-          payload = json.loads(src.read_text(encoding="utf-8"))
-          records = payload.get("object_access_records", [])
-
-          import_records = []
-          for r in records:
-              activity = str(r.get("activity", "")).strip().upper()
-              if activity in {"REMOVE", "REVOKE"}:
-                  rr = dict(r)
-                  rr["activity"] = "ADD"
-                  import_records.append(rr)
-
-          payload["object_access_records"] = import_records
-          dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-          print(f"Import tfvars written: {dst}")
-          print(f"Import target rows: {len(import_records)}")
-          PY
-
       - name: Azure login
         uses: azure/login@v2
         with:
@@ -339,8 +91,10 @@ jobs:
             }
 
       - name: Load Databricks secrets from Key Vault
+        id: kv
         shell: bash
         run: |
+          set -euo pipefail
           KV="${{ secrets.KEYVAULT_NAME }}"
 
           get_kv_secret() {
@@ -381,21 +135,118 @@ jobs:
           echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
           echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
 
-          echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+          {
+            echo "databricks_host=$DATABRICKS_HOST_VALUE"
+            echo "databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE"
+            echo "databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE"
+            echo "tf_backend_resource_group_name=$TFSTATE_RESOURCE_GROUP_VALUE"
+            echo "tf_backend_storage_account_name=$TFSTATE_STORAGE_ACCOUNT_VALUE"
+            echo "tf_backend_container_name=$TFSTATE_CONTAINER_VALUE"
+            echo "tf_backend_access_key=$TFSTATE_ACCESS_KEY_VALUE"
+            echo "tf_backend_key=$TFSTATE_KEY_EFFECTIVE"
+          } >> "$GITHUB_OUTPUT"
 
-          echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE" >> "$GITHUB_ENV"
-          echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
-          echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
-          echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
-          echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE" >> "$GITHUB_ENV"
+  plan-object-access:
+    needs: [detect-templates, load-runtime-secrets]
+    if: ${{ needs.detect-templates.outputs.has_templates == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
+    env:
+      TEMPLATE_FILE: ${{ matrix.template_file }}
+      OUTPUT_ROOT: uda/output/object-access
+      TF_VAR_databricks_host: ${{ needs.load-runtime-secrets.outputs.databricks_host }}
+      TF_VAR_databricks_client_id: ${{ needs.load-runtime-secrets.outputs.databricks_client_id }}
+      TF_VAR_databricks_client_secret: ${{ needs.load-runtime-secrets.outputs.databricks_client_secret }}
+      TF_BACKEND_RESOURCE_GROUP_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_resource_group_name }}
+      TF_BACKEND_STORAGE_ACCOUNT_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_storage_account_name }}
+      TF_BACKEND_CONTAINER_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_container_name }}
+      TF_BACKEND_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_key }}
+      TF_BACKEND_ACCESS_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_access_key }}
+      DATABRICKS_HOST: ${{ needs.load-runtime-secrets.outputs.databricks_host }}
+      DATABRICKS_CLIENT_ID: ${{ needs.load-runtime-secrets.outputs.databricks_client_id }}
+      DATABRICKS_CLIENT_SECRET: ${{ needs.load-runtime-secrets.outputs.databricks_client_secret }}
 
-          echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
-          echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
-          echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-          echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Terraform
+        id: setup_terraform_plan
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Install workflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml openpyxl xlrd
+
+      - name: Prepare output paths
+        id: prep_paths
+        shell: bash
+        run: |
+          template_name="$(basename "$TEMPLATE_FILE")"
+          request_id="${template_name%.*}"
+          output_dir="$OUTPUT_ROOT/$request_id"
+          mkdir -p "$output_dir"
+          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
+          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
+          echo "PARSED_JSON=$output_dir/parsed-object-access.json" >> "$GITHUB_ENV"
+          echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
+          echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
+          echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
+          echo "TFPLAN_MIXED_ADD_TXT=$output_dir/object-access-add-plan.txt" >> "$GITHUB_ENV"
+          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Validate object access template
+        run: |
+          python uda/scripts/object-access/validate_template.py \
+            --template-file "$TEMPLATE_FILE" \
+            --sheet-name "Object List"
+
+      - name: Parse object access template
+        run: |
+          python uda/scripts/object-access/parse_template.py \
+            --template-file "$TEMPLATE_FILE" \
+            --sheet-name "Object List" \
+            --output-file "$PARSED_JSON"
+
+      - name: Generate tfvars JSON
+        run: |
+          python uda/scripts/object-access/generate_tfvars.py \
+            --input-json "$PARSED_JSON" \
+            --output-json "$TFVARS_JSON"
+
+      - name: Determine request activity from parsed rows
+        shell: bash
+        run: |
+          REQUEST_ACTIVITY="$(python uda/scripts/object-access/determine_request_activity.py --tfvars-json "$TFVARS_JSON")"
+          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
+          echo "$REQUEST_ACTIVITY" > "$OUTPUT_DIR/request_activity.txt"
+
+      - name: Build import tfvars for REMOVE targets
+        shell: bash
+        run: |
+          if [ "${REQUEST_ACTIVITY:-}" = "ADD" ]; then
+            echo "Import tfvars not needed for ADD-only request."
+            exit 0
+          fi
+
+          python uda/scripts/object-access/build_import_tfvars.py \
+            --input-json "$TFVARS_JSON" \
+            --output-json "$TFVARS_IMPORT_JSON"
 
       - name: Terraform init (with retry)
         shell: bash
@@ -416,9 +267,6 @@ jobs:
           done
           echo "terraform init failed after 3 attempts" >&2
           exit 1
-
-      - name: Terraform validate
-        run: terraform -chdir=terraform validate
 
       - name: Terraform plan
         shell: bash
@@ -553,7 +401,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   apply-object-access:
-    needs: [detect-templates, plan-object-access]
+    needs: [detect-templates, load-runtime-secrets, plan-object-access]
     if: ${{ needs.detect-templates.outputs.has_templates == 'true' && ((github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply)) }}
     runs-on: ubuntu-latest
     strategy:
@@ -563,46 +411,29 @@ jobs:
     environment: prod
     env:
       TEMPLATE_FILE: ${{ matrix.template_file }}
-      OUTPUT_ROOT: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
+      OUTPUT_ROOT: uda/output/object-access
+      TF_VAR_databricks_host: ${{ needs.load-runtime-secrets.outputs.databricks_host }}
+      TF_VAR_databricks_client_id: ${{ needs.load-runtime-secrets.outputs.databricks_client_id }}
+      TF_VAR_databricks_client_secret: ${{ needs.load-runtime-secrets.outputs.databricks_client_secret }}
+      TF_BACKEND_RESOURCE_GROUP_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_resource_group_name }}
+      TF_BACKEND_STORAGE_ACCOUNT_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_storage_account_name }}
+      TF_BACKEND_CONTAINER_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_container_name }}
+      TF_BACKEND_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_key }}
+      TF_BACKEND_ACCESS_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_access_key }}
+      DATABRICKS_HOST: ${{ needs.load-runtime-secrets.outputs.databricks_host }}
+      DATABRICKS_CLIENT_ID: ${{ needs.load-runtime-secrets.outputs.databricks_client_id }}
+      DATABRICKS_CLIENT_SECRET: ${{ needs.load-runtime-secrets.outputs.databricks_client_secret }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install workflow dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml openpyxl xlrd
-
       - name: Set up Terraform
         id: setup_terraform_apply
-        continue-on-error: true
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.8
           terraform_wrapper: false
-
-      - name: Fallback install Terraform
-        if: steps.setup_terraform_apply.outcome == 'failure'
-        shell: bash
-        run: |
-          set -euo pipefail
-          TF_VERSION="1.9.8"
-          curl --proto '=https' --proto-redir '=https' -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip
-          unzip -o /tmp/terraform.zip -d /tmp
-          mkdir -p "$HOME/bin"
-          mv /tmp/terraform "$HOME/bin/terraform"
-          chmod +x "$HOME/bin/terraform"
-          echo "$HOME/bin" >> "$GITHUB_PATH"
-
-      - name: Verify Terraform
-        shell: bash
-        run: terraform version
 
       - name: Prepare output paths
         id: prep_paths
@@ -627,136 +458,19 @@ jobs:
           name: uda-dbx-object-access-plan-output-${{ steps.prep_paths.outputs.request_id }}
           path: ${{ steps.prep_paths.outputs.output_dir }}
 
-      - name: Determine request activity from parsed rows
+      - name: Load request activity from plan outputs
         shell: bash
         run: |
-          REQUEST_ACTIVITY="$(python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          payload = json.loads(Path(os.environ["TFVARS_JSON"]).read_text(encoding="utf-8"))
-          activities = sorted({str(r.get("activity", "")).strip().upper() for r in payload.get("object_access_records", []) if str(r.get("activity", "")).strip()})
-
-          if not activities:
-              raise SystemExit("No activity found in parsed template rows")
-
-          normalized = set()
-          for a in activities:
-              if a == "REVOKE":
-                  normalized.add("REMOVE")
-              else:
-                  normalized.add(a)
-
-          if len(normalized) == 1:
-              print(next(iter(normalized)))
-          elif normalized == {"ADD", "REMOVE"}:
-              print("MIXED")
-          else:
-              raise SystemExit(f"Unsupported activity combination in a single template. Found={sorted(normalized)}")
-          PY
-          )"
-          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
-
-      - name: Build import tfvars for REMOVE targets
-        shell: bash
-        run: |
-          if [ "${REQUEST_ACTIVITY:-}" = "ADD" ]; then
-            echo "Import tfvars not needed for ADD-only request."
-            exit 0
-          fi
-
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          src = Path(os.environ["TFVARS_JSON"])
-          dst = Path(os.environ["TFVARS_IMPORT_JSON"])
-          payload = json.loads(src.read_text(encoding="utf-8"))
-          records = payload.get("object_access_records", [])
-
-          import_records = []
-          for r in records:
-              activity = str(r.get("activity", "")).strip().upper()
-              if activity in {"REMOVE", "REVOKE"}:
-                  rr = dict(r)
-                  rr["activity"] = "ADD"
-                  import_records.append(rr)
-
-          payload["object_access_records"] = import_records
-          dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-          print(f"Import tfvars written: {dst}")
-          print(f"Import target rows: {len(import_records)}")
-          PY
-
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: |
-            {
-              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
-              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
-            }
-
-      - name: Load Databricks secrets from Key Vault
-        shell: bash
-        run: |
-          KV="${{ secrets.KEYVAULT_NAME }}"
-
-          get_kv_secret() {
-            local out_var="$1"
-            shift
-            local names=("$@")
-            local value=""
-            for secret_name in "${names[@]}"; do
-              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
-              if [ -n "$value" ]; then
-                printf -v "$out_var" '%s' "$value"
-                return 0
-              fi
-            done
-            echo "Missing Key Vault secret. Tried names: ${names[*]}" >&2
+          if [ ! -f "$OUTPUT_DIR/request_activity.txt" ]; then
+            echo "Missing request activity file in plan outputs: $OUTPUT_DIR/request_activity.txt" >&2
             exit 1
-          }
-
-          get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST DB-HOST
-          DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
-          get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID DATABRICKS-CLIENT-ID
-          get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET DATABRICKS-CLIENT-SECRET
-          get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID DATABRICKS-TENANT-ID
-          get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP TFSTATE-RESOURCE-GROUP-DBX-UDA
-          get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
-          get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
-          get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
-
-          TFSTATE_KEY_EFFECTIVE="addremove.tfstate"
-
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
-            if [ -z "${!v}" ]; then
-              echo "Missing or empty secret value for $v from Key Vault $KV" >&2
-              exit 1
-            fi
-          done
-
-          echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
-          echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
-
-          echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
-
-          echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE" >> "$GITHUB_ENV"
-          echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
-          echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
-          echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
-          echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE" >> "$GITHUB_ENV"
-
-          echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
-          echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
-          echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+          fi
+          REQUEST_ACTIVITY="$(tr -d '\r\n' < "$OUTPUT_DIR/request_activity.txt")"
+          if [ -z "$REQUEST_ACTIVITY" ]; then
+            echo "Request activity file is empty: $OUTPUT_DIR/request_activity.txt" >&2
+            exit 1
+          fi
+          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
 
       - name: Terraform init (with retry)
         shell: bash
