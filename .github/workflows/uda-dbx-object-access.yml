@@ -173,6 +173,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -245,8 +256,7 @@ jobs:
           fi
 
           python uda/scripts/object-access/build_import_tfvars.py \
-            --input-json "$TFVARS_JSON" \
-            --output-json "$TFVARS_IMPORT_JSON"
+            --input-json "$TFVARS_JSON"
 
       - name: Terraform init (with retry)
         shell: bash
@@ -427,6 +437,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
 
       - name: Set up Terraform
         id: setup_terraform_apply

@@ -32,33 +32,32 @@ def build_import_tfvars(src: Path, dst: Path) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build import tfvars for REMOVE/REVOKE rows")
     parser.add_argument("--input-json", required=True, help="Path to object-access.auto.tfvars.json")
-    parser.add_argument("--output-json", required=True, help="Path to object-access-import.auto.tfvars.json")
     return parser.parse_args()
 
 
-def _resolve_repo_json_path(path_input: str, *, must_exist: bool) -> Path:
-    repo_root = Path.cwd().resolve()
-    raw_path = Path(path_input)
-    resolved = (repo_root / raw_path).resolve() if not raw_path.is_absolute() else raw_path.resolve()
-
-    if repo_root != resolved and repo_root not in resolved.parents:
-        raise ValueError(f"Path escapes workspace root: {path_input}")
-    if resolved.suffix.lower() != ".json":
-        raise ValueError(f"Path must use .json extension: {path_input}")
-    if must_exist and not resolved.is_file():
+def _resolve_input_json(path_input: str) -> Path:
+    src = Path(path_input)
+    if src.suffix.lower() != ".json":
+        raise ValueError(f"Input path must use .json extension: {path_input}")
+    if not src.is_file():
         raise ValueError(f"Input file not found: {path_input}")
-    return resolved
+    return src.resolve()
+
+
+def _derived_output_path(src: Path) -> Path:
+    # Keep output naming deterministic and not user-controlled.
+    return src.with_name("object-access-import.auto.tfvars.json")
 
 
 def main() -> int:
     args = parse_args()
     try:
-        src = _resolve_repo_json_path(args.input_json, must_exist=True)
-        dst = _resolve_repo_json_path(args.output_json, must_exist=False)
+        src = _resolve_input_json(args.input_json)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
+    dst = _derived_output_path(src)
     dst.parent.mkdir(parents=True, exist_ok=True)
     count = build_import_tfvars(src, dst)
     print(f"Import tfvars written: {dst}")
