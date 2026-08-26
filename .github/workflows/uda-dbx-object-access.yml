@@ -645,13 +645,7 @@ jobs:
 
               if [ "${#target_args[@]}" -eq 0 ]; then
                 if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
-                  echo "No requested revoke targets exist in state. Creating refresh-only no-op plan."
-                  terraform -chdir=terraform plan \
-                    -lock-timeout=10m \
-                    -refresh-only \
-                    -var-file="../$TFVARS_JSON" \
-                    -out="../$TFPLAN_BIN"
-                  terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+                  echo "No requested revoke targets exist in state. Skipping apply for REMOVE request."
                   exit 0
                 fi
 
