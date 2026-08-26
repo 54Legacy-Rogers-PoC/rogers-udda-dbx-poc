@@ -362,7 +362,7 @@ jobs:
           fi
 
       - name: Publish plan outputs
-        if: always()
+        if: ${{ always() && steps.prep_paths.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: uda-dbx-object-access-plan-output-${{ steps.prep_paths.outputs.request_id }}
