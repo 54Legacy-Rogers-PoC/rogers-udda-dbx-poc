@@ -106,7 +106,7 @@ def load_workbook_compat(template_file: Path) -> tuple[Any, str | None]:
 
     try:
         xlrd = importlib.import_module("xlrd")
-    except ModuleNotFoundError as exc:
+    except ModuleNotFoundError:
         raise SystemExit("xlrd is required for .xls support. Install with: pip install xlrd")
 
     try:
@@ -135,6 +135,26 @@ def _is_placeholder(value: str) -> bool:
     return v.startswith("<enter") or v in {"na", "n/a", "-"}
 
 
+def _is_valid_candidate(candidate: str, prefer_email: bool) -> bool:
+    if not candidate or _is_placeholder(candidate):
+        return False
+    return (not prefer_email) or ("@" in candidate)
+
+
+def _value_from_entry_col(row_values: list[str], requestor_col: int | None, prefer_email: bool) -> str:
+    if requestor_col is None or requestor_col >= len(row_values):
+        return ""
+    entry_val = row_values[requestor_col]
+    return entry_val if _is_valid_candidate(entry_val, prefer_email) else ""
+
+
+def _value_right_of_index(row_values: list[str], start_idx: int, prefer_email: bool) -> str:
+    for nxt in row_values[start_idx + 1 :]:
+        if _is_valid_candidate(nxt, prefer_email):
+            return nxt
+    return ""
+
+
 def _find_requestor_entry_col(sheet: Any) -> int | None:
     for row in sheet.iter_rows(min_row=1, max_row=30, values_only=True):
         for idx, cell in enumerate([normalize(v) for v in row]):
@@ -149,35 +169,68 @@ def _value_right_of_label(
     requestor_col: int | None = None,
     prefer_email: bool = False,
 ) -> str:
-    def _value_ok(candidate: str) -> bool:
-        if not candidate or _is_placeholder(candidate):
-            return False
-        return (not prefer_email) or ("@" in candidate)
-
-    def _value_from_entry_col(row_values: list[str]) -> str:
-        if requestor_col is None or requestor_col >= len(row_values):
-            return ""
-        entry_val = row_values[requestor_col]
-        return entry_val if _value_ok(entry_val) else ""
-
-    def _value_right_of_index(row_values: list[str], start_idx: int) -> str:
-        for nxt in row_values[start_idx + 1 :]:
-            if _value_ok(nxt):
-                return nxt
-        return ""
-
     for row in sheet.iter_rows(values_only=True):
         row_values = [normalize(v) for v in row]
         for idx, cell in enumerate(row_values):
             cell_key = header_key(cell)
             if any(m in cell_key for m in label_matchers):
-                entry_value = _value_from_entry_col(row_values)
+                entry_value = _value_from_entry_col(row_values, requestor_col, prefer_email)
                 if entry_value:
                     return entry_value
-                right_value = _value_right_of_index(row_values, idx)
+                right_value = _value_right_of_index(row_values, idx, prefer_email)
                 if right_value:
                     return right_value
     return ""
+
+
+def _empty_context() -> dict[str, str]:
+    return {
+        "environment": "",
+        "activity_type": "",
+        "ad_group_name": "",
+        "service_account_name": "",
+    }
+
+
+def _extract_sheet_context(sheet: Any, requestor_col: int) -> dict[str, str]:
+    return {
+        "environment": _value_right_of_label(sheet, ["environment"], requestor_col=requestor_col),
+        "activity_type": _value_right_of_label(sheet, ["request type", "activity"], requestor_col=requestor_col),
+        "ad_group_name": _value_right_of_label(
+            sheet,
+            ["dtb ad group name", "ad group name"],
+            requestor_col=requestor_col,
+            prefer_email=True,
+        ),
+        "service_account_name": _value_right_of_label(
+            sheet,
+            ["service account name"],
+            requestor_col=requestor_col,
+            prefer_email=True,
+        ),
+    }
+
+
+def _merge_found_context(context_values: dict[str, str], found_values: dict[str, str]) -> None:
+    for key, value in found_values.items():
+        if not context_values[key] and value:
+            context_values[key] = value
+
+
+def _context_complete(context_values: dict[str, str]) -> bool:
+    return bool(
+        context_values["environment"]
+        and context_values["activity_type"]
+        and (context_values["ad_group_name"] or context_values["service_account_name"])
+    )
+
+
+def _principal_fields(context_values: dict[str, str]) -> tuple[str, str]:
+    if context_values["ad_group_name"]:
+        return "ad_group", context_values["ad_group_name"]
+    if context_values["service_account_name"]:
+        return "service_account", context_values["service_account_name"]
+    return "", ""
 
 
 def read_workbook_context(
@@ -186,51 +239,6 @@ def read_workbook_context(
     *,
     swallow_errors: bool,
 ) -> dict[str, str]:
-    def _empty_context() -> dict[str, str]:
-        return {
-            "environment": "",
-            "activity_type": "",
-            "ad_group_name": "",
-            "service_account_name": "",
-        }
-
-    def _extract_sheet_context(sheet: Any, requestor_col: int) -> dict[str, str]:
-        return {
-            "environment": _value_right_of_label(sheet, ["environment"], requestor_col=requestor_col),
-            "activity_type": _value_right_of_label(sheet, ["request type", "activity"], requestor_col=requestor_col),
-            "ad_group_name": _value_right_of_label(
-                sheet,
-                ["dtb ad group name", "ad group name"],
-                requestor_col=requestor_col,
-                prefer_email=True,
-            ),
-            "service_account_name": _value_right_of_label(
-                sheet,
-                ["service account name"],
-                requestor_col=requestor_col,
-                prefer_email=True,
-            ),
-        }
-
-    def _merge_found_context(context_values: dict[str, str], found_values: dict[str, str]) -> None:
-        for key, value in found_values.items():
-            if not context_values[key] and value:
-                context_values[key] = value
-
-    def _context_complete(context_values: dict[str, str]) -> bool:
-        return bool(
-            context_values["environment"]
-            and context_values["activity_type"]
-            and (context_values["ad_group_name"] or context_values["service_account_name"])
-        )
-
-    def _principal_fields(context_values: dict[str, str]) -> tuple[str, str]:
-        if context_values["ad_group_name"]:
-            return "ad_group", context_values["ad_group_name"]
-        if context_values["service_account_name"]:
-            return "service_account", context_values["service_account_name"]
-        return "", ""
-
     try:
         workbook, tmp_path = load_workbook_compat(template_file)
     except Exception:  # pylint: disable=broad-except
