@@ -2,16 +2,15 @@
 
 ## 1. Purpose
 This document defines the Excel template contract used for Databricks object access requests.
-The template is the authoritative source for object-level entitlements referenced by the request YAML.
+The template is the authoritative source for object-level entitlements used by the workflow.
 
 ## 2. File Location
-- Template reference folder: `uda/templates/object-access/`
 - Request attachment folder: `uda/attachments/object-access/`
-- Recommended template name: `ObjectAccessTemplate.xlsx`
+- Typical template naming: request-driven file names such as `RITM123456.xlsx`
 
 ## 3. Workbook and Worksheet Rules
-1. Workbook must be `.xlsx` format.
-2. Workbook must contain a worksheet named `ObjectAccess`.
+1. Workbook can be `.xlsx`, `.xlsm`, or `.xls`.
+2. Workflow reads worksheet named `Object List`.
 3. First row must contain column headers exactly as specified.
 4. Data records start at row 2.
 5. Empty trailing rows are ignored.
@@ -20,10 +19,10 @@ The template is the authoritative source for object-level entitlements reference
 
 | Column Name | Type | Required | Allowed Values / Format | Notes |
 |---|---|---|---|---|
-| Record_ID | string | Yes | Non-empty, unique in file | Row identifier |
-| Activity | string | Yes* | `ADD`, `REMOVE` | Optional only if inheriting from YAML `activity_type` |
-| Environment | string | Yes | `DEV`, `QA`, `PRD` | Must match request YAML environment |
-| Access_For | string | Yes | `ad_group`, `service_account` | Must match request YAML access_for |
+| Record_ID | string | Optional | Non-empty if provided | Row identifier |
+| Activity | string | Yes | `ADD`, `REMOVE`, `REVOKE` | `REVOKE` is normalized to `REMOVE` |
+| Environment | string | Yes | `DEV`, `QA`, `PRD` | |
+| Access_For | string | Yes | `ad_group`, `service_account` | |
 | Principal_Name | string | Yes | Non-empty | Group or service account name |
 | Object_Type | string | Yes | `CATALOG`, `SCHEMA`, `VIEW`, `FOLDER` | Determines conditional fields |
 | Catalog | string | Conditional | Non-empty text | Required for CATALOG/SCHEMA/VIEW |
@@ -59,13 +58,12 @@ Validation behavior:
 2. Privilege must exist in allowed set for the row's `Object_Type`.
 
 ## 7. Cross-Field Consistency Rules
-1. `Environment` in every row must equal request YAML `environment`.
-2. `Access_For` in every row must equal request YAML `access_for`.
-3. `Principal_Name` in every row should equal the principal in request YAML:
-	- `ad_group_name` when `access_for=ad_group`
-	- `service_account_name` when `access_for=service_account`
-4. If `Activity` column is populated, values must be `ADD` or `REMOVE`.
-5. If mixed activities are used, each row is processed by its own activity.
+1. `Environment`, `Access_For`, and `Principal_Name` must be consistent across rows for the same request context.
+2. `Activity` values are normalized by workflow logic:
+	- `ADD` stays `ADD`
+	- `REMOVE` stays `REMOVE`
+	- `REVOKE` is treated as `REMOVE`
+3. Mixed activity templates (`ADD` + `REMOVE/REVOKE`) are supported.
 
 ## 8. Duplicate Detection
 Rows are considered duplicates when all fields below match exactly:
@@ -98,13 +96,13 @@ Duplicate rows are not allowed.
 | Code | Meaning |
 |---|---|
 | TPL-001 | Workbook file missing/unreadable |
-| TPL-002 | Worksheet `ObjectAccess` missing |
+| TPL-002 | Worksheet `Object List` missing |
 | TPL-003 | Missing required column(s) |
 | TPL-004 | Invalid enum value |
 | TPL-005 | Conditional field rule failure |
 | TPL-006 | Duplicate row detected |
 | TPL-007 | Invalid privilege for object type |
-| TPL-008 | Cross-field mismatch with request YAML |
+| TPL-008 | Cross-field mismatch with request context |
 | TPL-009 | Exceeded maximum row count |
 | TPL-010 | Mandatory value blank |
 

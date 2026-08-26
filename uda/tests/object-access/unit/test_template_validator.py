@@ -113,7 +113,7 @@ def test_missing_sheet_returns_tpl_002(tmp_path: Path) -> None:
 	assert "TPL-002" in _error_codes(errors)
 
 
-def test_missing_required_column_returns_tpl_003(tmp_path: Path) -> None:
+def test_missing_privilege_column_is_allowed_when_inferable(tmp_path: Path) -> None:
 	template_file = tmp_path / "ObjectAccessTemplate.xlsx"
 	bad_headers = [h for h in HEADERS if h != "Privilege"]
 	row = _valid_row()
@@ -121,7 +121,7 @@ def test_missing_required_column_returns_tpl_003(tmp_path: Path) -> None:
 	_write_template(template_file, [row], headers=bad_headers)
 
 	errors = validator.validate_template_file(template_file=template_file)
-	assert "TPL-003" in _error_codes(errors)
+	assert errors == []
 
 
 def test_invalid_enum_returns_tpl_004(tmp_path: Path) -> None:

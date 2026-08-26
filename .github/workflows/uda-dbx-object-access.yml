@@ -15,23 +15,12 @@ on:
     inputs:
       template_file:
         description: Path to a single Excel template file
-        required: false
-        default: ""
+        required: true
         type: string
       template_files:
         description: Optional comma or newline separated Excel template paths
         required: false
         default: ""
-        type: string
-      attachments_dir:
-        description: Directory containing template attachments
-        required: true
-        default: uda/attachments/object-access
-        type: string
-      output_dir:
-        description: Directory to write parsed/tfvars/plan outputs
-        required: true
-        default: uda/output/object-access
         type: string
       run_plan:
         description: Run Terraform plan stage
@@ -41,15 +30,15 @@ on:
       run_apply:
         description: Run Terraform apply stage
         required: true
-        default: true
+        default: false
         type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: uda-dbx-object-access-${{ github.ref }}
-  cancel-in-progress: true
+  group: uda-dbx-object-access-global
+  cancel-in-progress: false
 
 jobs:
   detect-templates:
@@ -70,86 +59,13 @@ jobs:
         env:
           TEMPLATE_FILE_INPUT: ${{ inputs.template_file }}
           TEMPLATE_FILES_INPUT: ${{ inputs.template_files }}
-          ATTACHMENTS_DIR_INPUT: ${{ inputs.attachments_dir }}
+          BASE_SHA_EVENT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA_EVENT: ${{ github.sha }}
         run: |
-          set -euo pipefail
-
-          is_excel() {
-            case "${1,,}" in
-              *.xlsx|*.xlsm|*.xls) return 0 ;;
-              *) return 1 ;;
-            esac
-          }
-
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            template_files_raw="${TEMPLATE_FILES_INPUT:-}"
-            single_template="${TEMPLATE_FILE_INPUT:-}"
-            attachments_dir="${ATTACHMENTS_DIR_INPUT:-uda/attachments/object-access}"
-
-            if [ -n "$template_files_raw" ]; then
-              mapfile -t requested_templates < <(printf '%s\n' "$template_files_raw" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | awk '!seen[$0]++')
-            elif [ -n "$single_template" ]; then
-              requested_templates=("$single_template")
-            else
-              mapfile -t requested_templates < <(find "$attachments_dir" -maxdepth 1 -type f \( -name '*.xlsx' -o -name '*.xlsm' -o -name '*.xls' \) | sed 's#^./##')
-            fi
-
-            if [ "${#requested_templates[@]}" -eq 0 ]; then
-              echo "No template files found for workflow_dispatch." >&2
-              exit 1
-            fi
-
-            valid_templates=()
-            for f in "${requested_templates[@]}"; do
-              if [ ! -f "$f" ]; then
-                echo "Requested template not found: $f" >&2
-                exit 1
-              fi
-              if ! is_excel "$f"; then
-                echo "Unsupported template extension (expected .xlsx/.xlsm/.xls): $f" >&2
-                exit 1
-              fi
-              valid_templates+=("$f")
-            done
-
-            matrix_json="$(python -c "import json,sys; print(json.dumps({'include':[{'template_file':f} for f in sys.argv[1:] if f]}))" "${valid_templates[@]}")"
-            echo "has_templates=true" >> "$GITHUB_OUTPUT"
-            echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            base_sha="${{ github.event.pull_request.base.sha }}"
-            head_sha="${{ github.sha }}"
-          else
-            base_sha="${{ github.event.before }}"
-            head_sha="${{ github.sha }}"
-            if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
-              base_sha="$(git rev-parse HEAD~1)"
-            fi
-          fi
-
-          mapfile -t changed_templates < <(git diff --name-only --diff-filter=A "$base_sha" "$head_sha" -- "uda/attachments/object-access/*")
-
-          existing_templates=()
-          for f in "${changed_templates[@]}"; do
-            if [ -f "$f" ] && is_excel "$f"; then
-              existing_templates+=("$f")
-            fi
-          done
-
-          if [ "${#existing_templates[@]}" -eq 0 ]; then
-            echo "has_templates=false" >> "$GITHUB_OUTPUT"
-            echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          matrix_json="$(python -c "import json,sys; print(json.dumps({'include':[{'template_file':f} for f in sys.argv[1:] if f]}))" "${existing_templates[@]}")"
-          echo "has_templates=true" >> "$GITHUB_OUTPUT"
-          echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
+          bash uda/scripts/object-access/collect_template_files.sh
 
   plan-object-access:
-    needs: detect-templates
+    needs: [detect-templates]
     if: ${{ needs.detect-templates.outputs.has_templates == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
     runs-on: ubuntu-latest
     strategy:
@@ -158,174 +74,11 @@ jobs:
       matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
     env:
       TEMPLATE_FILE: ${{ matrix.template_file }}
-      OUTPUT_ROOT: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
+      OUTPUT_ROOT: uda/output/object-access
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Terraform
-        id: setup_terraform_plan
-        continue-on-error: true
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.8
-          terraform_wrapper: false
-
-      - name: Fallback install Terraform
-        if: steps.setup_terraform_plan.outcome == 'failure'
-        shell: bash
-        run: |
-          set -euo pipefail
-          TF_VERSION="1.9.8"
-          curl --proto '=https' --proto-redir '=https' -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip
-          unzip -o /tmp/terraform.zip -d /tmp
-          mkdir -p "$HOME/bin"
-          mv /tmp/terraform "$HOME/bin/terraform"
-          chmod +x "$HOME/bin/terraform"
-          echo "$HOME/bin" >> "$GITHUB_PATH"
-
-      - name: Verify Terraform
-        shell: bash
-        run: terraform version
-
-      - name: Install workflow dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml openpyxl xlrd
-
-      - name: Prepare output paths
-        id: prep_paths
-        shell: bash
-        run: |
-          template_name="$(basename "$TEMPLATE_FILE")"
-          request_id="${template_name%.*}"
-          output_dir="$OUTPUT_ROOT/$request_id"
-          mkdir -p "$output_dir"
-          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
-          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
-          echo "PARSED_JSON=$output_dir/parsed-object-access.json" >> "$GITHUB_ENV"
-          echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
-          echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
-          echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
-          echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
-          echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
-          echo "TFPLAN_MIXED_ADD_TXT=$output_dir/object-access-add-plan.txt" >> "$GITHUB_ENV"
-          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
-          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve object list worksheet name
-        id: resolve_sheet
-        shell: bash
-        run: |
-          SHEET_NAME="$(python - <<'PY'
-          import os
-          from pathlib import Path
-          from openpyxl import load_workbook
-
-          template_path = Path(os.environ["TEMPLATE_FILE"])
-          wb = load_workbook(template_path, data_only=True)
-          sheetnames = wb.sheetnames
-
-          for candidate in ["ObjectAccess", "Object List"]:
-              if candidate in sheetnames:
-                  print(candidate)
-                  raise SystemExit(0)
-
-          raise SystemExit(
-              "Unable to resolve worksheet. Expected one of ['ObjectAccess', 'Object List']. "
-              f"Available sheets={sheetnames}"
-          )
-          PY
-          )"
-          echo "sheet_name=$SHEET_NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Validate object access template
-        run: |
-          python uda/scripts/object-access/validate_template.py \
-            --template-file "$TEMPLATE_FILE" \
-            --sheet-name "${{ steps.resolve_sheet.outputs.sheet_name }}"
-
-      - name: Parse object access template
-        run: |
-          python uda/scripts/object-access/parse_template.py \
-            --template-file "$TEMPLATE_FILE" \
-            --sheet-name "${{ steps.resolve_sheet.outputs.sheet_name }}" \
-            --output-file "$PARSED_JSON"
-
-      - name: Generate tfvars JSON
-        run: |
-          python uda/scripts/object-access/generate_tfvars.py \
-            --input-json "$PARSED_JSON" \
-            --output-json "$TFVARS_JSON"
-
-      - name: Determine request activity from parsed rows
-        shell: bash
-        run: |
-          REQUEST_ACTIVITY="$(python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          payload = json.loads(Path(os.environ["TFVARS_JSON"]).read_text(encoding="utf-8"))
-          activities = sorted({str(r.get("activity", "")).strip().upper() for r in payload.get("object_access_records", []) if str(r.get("activity", "")).strip()})
-
-          if not activities:
-              raise SystemExit("No activity found in parsed template rows")
-
-          normalized = set()
-          for a in activities:
-              if a == "REVOKE":
-                  normalized.add("REMOVE")
-              else:
-                  normalized.add(a)
-
-          if len(normalized) == 1:
-              print(next(iter(normalized)))
-          elif normalized == {"ADD", "REMOVE"}:
-              print("MIXED")
-          else:
-              raise SystemExit(f"Unsupported activity combination in a single template. Found={sorted(normalized)}")
-          PY
-          )"
-          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
-
-      - name: Build import tfvars for REMOVE targets
-        shell: bash
-        run: |
-          if [ "${REQUEST_ACTIVITY:-}" = "ADD" ]; then
-            echo "Import tfvars not needed for ADD-only request."
-            exit 0
-          fi
-
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          src = Path(os.environ["TFVARS_JSON"])
-          dst = Path(os.environ["TFVARS_IMPORT_JSON"])
-          payload = json.loads(src.read_text(encoding="utf-8"))
-          records = payload.get("object_access_records", [])
-
-          import_records = []
-          for r in records:
-              activity = str(r.get("activity", "")).strip().upper()
-              if activity in {"REMOVE", "REVOKE"}:
-                  rr = dict(r)
-                  rr["activity"] = "ADD"
-                  import_records.append(rr)
-
-          payload["object_access_records"] = import_records
-          dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-          print(f"Import tfvars written: {dst}")
-          print(f"Import target rows: {len(import_records)}")
-          PY
 
       - name: Azure login
         uses: azure/login@v2
@@ -397,9 +150,90 @@ jobs:
 
           echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Terraform
+        id: setup_terraform_plan
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Install workflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --only-binary=:all: pyyaml==6.0.2 openpyxl==3.1.5 xlrd==2.0.1
+
+      - name: Prepare output paths
+        id: prep_paths
+        shell: bash
+        run: |
+          template_name="$(basename "$TEMPLATE_FILE")"
+          request_id="${template_name%.*}"
+          output_dir="$OUTPUT_ROOT/$request_id"
+          mkdir -p "$output_dir"
+          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
+          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
+          echo "PARSED_JSON=$output_dir/parsed-object-access.json" >> "$GITHUB_ENV"
+          echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
+          echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
+          echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
+          echo "TFPLAN_MIXED_ADD_TXT=$output_dir/object-access-add-plan.txt" >> "$GITHUB_ENV"
+          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Validate object access template
+        run: |
+          python uda/scripts/object-access/validate_template.py \
+            --template-file "$TEMPLATE_FILE" \
+            --sheet-name "Object List"
+
+      - name: Parse object access template
+        run: |
+          python uda/scripts/object-access/parse_template.py \
+            --template-file "$TEMPLATE_FILE" \
+            --sheet-name "Object List" \
+            --output-file "$PARSED_JSON"
+
+      - name: Generate tfvars JSON
+        run: |
+          python uda/scripts/object-access/generate_tfvars.py \
+            --input-json "$PARSED_JSON" \
+            --output-json "$TFVARS_JSON"
+
+      - name: Determine request activity from parsed rows
+        shell: bash
+        run: |
+          REQUEST_ACTIVITY="$(python uda/scripts/object-access/determine_request_activity.py --tfvars-json "$TFVARS_JSON")"
+          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
+          echo "$REQUEST_ACTIVITY" > "$OUTPUT_DIR/request_activity.txt"
+
+      - name: Build import tfvars for REMOVE targets
+        shell: bash
+        run: |
+          if [ "${REQUEST_ACTIVITY:-}" = "ADD" ]; then
+            echo "Import tfvars not needed for ADD-only request."
+            exit 0
+          fi
+
+          (
+            cd "$OUTPUT_DIR"
+            python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_import_tfvars.py"
+          )
+
       - name: Terraform init (with retry)
         shell: bash
         run: |
+          if [ -z "${TF_BACKEND_ACCESS_KEY:-}" ]; then
+            echo "TF_BACKEND_ACCESS_KEY is empty; cannot initialize Terraform backend." >&2
+            exit 1
+          fi
+
           for attempt in 1 2 3; do
             echo "Terraform init attempt $attempt/3"
             if terraform -chdir=terraform init \
@@ -407,6 +241,7 @@ jobs:
               -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
               -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
               -backend-config="key=$TF_BACKEND_KEY" \
+              -backend-config="use_azuread_auth=false" \
               -backend-config="access_key=$TF_BACKEND_ACCESS_KEY"; then
               exit 0
             fi
@@ -416,9 +251,6 @@ jobs:
           done
           echo "terraform init failed after 3 attempts" >&2
           exit 1
-
-      - name: Terraform validate
-        run: terraform -chdir=terraform validate
 
       - name: Terraform plan
         shell: bash
@@ -563,132 +395,11 @@ jobs:
     environment: prod
     env:
       TEMPLATE_FILE: ${{ matrix.template_file }}
-      OUTPUT_ROOT: ${{ github.event_name == 'workflow_dispatch' && inputs.output_dir || 'uda/output/object-access' }}
+      OUTPUT_ROOT: uda/output/object-access
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install workflow dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml openpyxl xlrd
-
-      - name: Set up Terraform
-        id: setup_terraform_apply
-        continue-on-error: true
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.8
-          terraform_wrapper: false
-
-      - name: Fallback install Terraform
-        if: steps.setup_terraform_apply.outcome == 'failure'
-        shell: bash
-        run: |
-          set -euo pipefail
-          TF_VERSION="1.9.8"
-          curl --proto '=https' --proto-redir '=https' -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip
-          unzip -o /tmp/terraform.zip -d /tmp
-          mkdir -p "$HOME/bin"
-          mv /tmp/terraform "$HOME/bin/terraform"
-          chmod +x "$HOME/bin/terraform"
-          echo "$HOME/bin" >> "$GITHUB_PATH"
-
-      - name: Verify Terraform
-        shell: bash
-        run: terraform version
-
-      - name: Prepare output paths
-        id: prep_paths
-        shell: bash
-        run: |
-          template_name="$(basename "$TEMPLATE_FILE")"
-          request_id="${template_name%.*}"
-          output_dir="$OUTPUT_ROOT/$request_id"
-          mkdir -p "$output_dir"
-          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
-          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
-          echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
-          echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
-          echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
-          echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
-          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
-          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
-
-      - name: Download plan outputs
-        uses: actions/download-artifact@v4
-        with:
-          name: uda-dbx-object-access-plan-output-${{ steps.prep_paths.outputs.request_id }}
-          path: ${{ steps.prep_paths.outputs.output_dir }}
-
-      - name: Determine request activity from parsed rows
-        shell: bash
-        run: |
-          REQUEST_ACTIVITY="$(python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          payload = json.loads(Path(os.environ["TFVARS_JSON"]).read_text(encoding="utf-8"))
-          activities = sorted({str(r.get("activity", "")).strip().upper() for r in payload.get("object_access_records", []) if str(r.get("activity", "")).strip()})
-
-          if not activities:
-              raise SystemExit("No activity found in parsed template rows")
-
-          normalized = set()
-          for a in activities:
-              if a == "REVOKE":
-                  normalized.add("REMOVE")
-              else:
-                  normalized.add(a)
-
-          if len(normalized) == 1:
-              print(next(iter(normalized)))
-          elif normalized == {"ADD", "REMOVE"}:
-              print("MIXED")
-          else:
-              raise SystemExit(f"Unsupported activity combination in a single template. Found={sorted(normalized)}")
-          PY
-          )"
-          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
-
-      - name: Build import tfvars for REMOVE targets
-        shell: bash
-        run: |
-          if [ "${REQUEST_ACTIVITY:-}" = "ADD" ]; then
-            echo "Import tfvars not needed for ADD-only request."
-            exit 0
-          fi
-
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          src = Path(os.environ["TFVARS_JSON"])
-          dst = Path(os.environ["TFVARS_IMPORT_JSON"])
-          payload = json.loads(src.read_text(encoding="utf-8"))
-          records = payload.get("object_access_records", [])
-
-          import_records = []
-          for r in records:
-              activity = str(r.get("activity", "")).strip().upper()
-              if activity in {"REMOVE", "REVOKE"}:
-                  rr = dict(r)
-                  rr["activity"] = "ADD"
-                  import_records.append(rr)
-
-          payload["object_access_records"] = import_records
-          dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-          print(f"Import tfvars written: {dst}")
-          print(f"Import target rows: {len(import_records)}")
-          PY
 
       - name: Azure login
         uses: azure/login@v2
@@ -758,9 +469,60 @@ jobs:
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
+          echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
+
+      - name: Set up Terraform
+        id: setup_terraform_apply
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Prepare output paths
+        id: prep_paths
+        shell: bash
+        run: |
+          template_name="$(basename "$TEMPLATE_FILE")"
+          request_id="${template_name%.*}"
+          output_dir="$OUTPUT_ROOT/$request_id"
+          mkdir -p "$output_dir"
+          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
+          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
+          echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
+          echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
+          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Download plan outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-dbx-object-access-plan-output-${{ steps.prep_paths.outputs.request_id }}
+          path: ${{ steps.prep_paths.outputs.output_dir }}
+
+      - name: Load request activity from plan outputs
+        shell: bash
+        run: |
+          if [ ! -f "$OUTPUT_DIR/request_activity.txt" ]; then
+            echo "Missing request activity file in plan outputs: $OUTPUT_DIR/request_activity.txt" >&2
+            exit 1
+          fi
+          REQUEST_ACTIVITY="$(tr -d '\r\n' < "$OUTPUT_DIR/request_activity.txt")"
+          if [ -z "$REQUEST_ACTIVITY" ]; then
+            echo "Request activity file is empty: $OUTPUT_DIR/request_activity.txt" >&2
+            exit 1
+          fi
+          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
+
       - name: Terraform init (with retry)
         shell: bash
         run: |
+          if [ -z "${TF_BACKEND_ACCESS_KEY:-}" ]; then
+            echo "TF_BACKEND_ACCESS_KEY is empty; cannot initialize Terraform backend." >&2
+            exit 1
+          fi
+
           for attempt in 1 2 3; do
             echo "Terraform init attempt $attempt/3"
             if terraform -chdir=terraform init \
@@ -768,6 +530,7 @@ jobs:
               -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
               -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
               -backend-config="key=$TF_BACKEND_KEY" \
+              -backend-config="use_azuread_auth=false" \
               -backend-config="access_key=$TF_BACKEND_ACCESS_KEY"; then
               exit 0
             fi
@@ -803,104 +566,95 @@ jobs:
             exit 1
           fi
 
-          if [ "$REQUEST_ACTIVITY" != "MIXED" ] || grep -q "Saved plan is stale" "$apply_log"; then
+          if grep -q "Saved plan is stale" "$apply_log"; then
             echo "Saved plan is stale. Rebuilding plan from current state and retrying apply once..."
-          fi
 
-          if [ "$REQUEST_ACTIVITY" != "ADD" ] && grep -q "Saved plan is stale" "$apply_log"; then
-            declare -a TARGETS=()
-            declare -A TARGET_IMPORT_ID=()
+            if [ "$REQUEST_ACTIVITY" != "ADD" ]; then
+              declare -a TARGETS=()
+              declare -A TARGET_IMPORT_ID=()
 
-            while IFS=$'\t' read -r target import_id; do
-              if [ -z "$target" ] || [ -z "$import_id" ]; then
-                continue
-              fi
-              TARGETS+=("$target")
-              TARGET_IMPORT_ID["$target"]="$import_id"
-            done < <(jq -r '.object_access_records[]
-              | select((.activity | ascii_upcase) == "REMOVE")
-              | if ((.object_type | ascii_upcase) == "CATALOG") then
-                  [
-                    "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
-                    "catalog/\(.catalog)/\(.principal_name)"
-                  ]
-                elif ((.object_type | ascii_upcase) == "SCHEMA") then
-                  [
-                    "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
-                    "schema/\(.catalog).\(.schema)/\(.principal_name)"
-                  ]
-                elif ((.object_type | ascii_upcase) == "VIEW") then
-                  [
-                    "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
-                    "table/\(.catalog).\(.schema).\(.object_name)/\(.principal_name)"
-                  ]
-                else empty end
-              | @tsv' "$TFVARS_JSON")
-
-            if [ "${#TARGETS[@]}" -eq 0 ]; then
-              echo "No revoke targets found for REMOVE/REVOKE template." >&2
-              exit 1
-            fi
-
-            mapfile -t STATE_ADDRS < <(terraform -chdir=terraform state list || true)
-
-            target_args=()
-            missing_targets=()
-            for t in "${TARGETS[@]}"; do
-              if ! printf '%s\n' "${STATE_ADDRS[@]}" | grep -Fx -- "$t" >/dev/null; then
-                import_id="${TARGET_IMPORT_ID[$t]:-}"
-                if [ -n "$import_id" ]; then
-                  echo "Target not in state. Attempting import for revoke: $import_id"
-                  if terraform -chdir=terraform import -var-file="../$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
-                    echo "Imported missing target into state: $t"
-                    target_args+=("-target=$t")
-                    continue
-                  else
-                    echo "Import failed for target: $t"
-                  fi
+              while IFS=$'\t' read -r target import_id; do
+                if [ -z "$target" ] || [ -z "$import_id" ]; then
+                  continue
                 fi
-                missing_targets+=("$t")
-                continue
+                TARGETS+=("$target")
+                TARGET_IMPORT_ID["$target"]="$import_id"
+              done < <(jq -r '.object_access_records[]
+                | select((.activity | ascii_upcase) == "REMOVE")
+                | if ((.object_type | ascii_upcase) == "CATALOG") then
+                    [
+                      "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
+                      "catalog/\(.catalog)/\(.principal_name)"
+                    ]
+                  elif ((.object_type | ascii_upcase) == "SCHEMA") then
+                    [
+                      "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
+                      "schema/\(.catalog).\(.schema)/\(.principal_name)"
+                    ]
+                  elif ((.object_type | ascii_upcase) == "VIEW") then
+                    [
+                      "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
+                      "table/\(.catalog).\(.schema).\(.object_name)/\(.principal_name)"
+                    ]
+                  else empty end
+                | @tsv' "$TFVARS_JSON")
+
+              if [ "${#TARGETS[@]}" -eq 0 ]; then
+                echo "No revoke targets found for REMOVE/REVOKE template." >&2
+                exit 1
               fi
-              target_args+=("-target=$t")
-            done
 
-            if [ "${#missing_targets[@]}" -gt 0 ]; then
-              echo "Skipping revoke targets not found in backend state ($TF_BACKEND_KEY):"
-              printf ' - %s\n' "${missing_targets[@]}"
-              echo "Continuing with targets that are present in state."
-            fi
+              mapfile -t STATE_ADDRS < <(terraform -chdir=terraform state list || true)
 
-            if [ "${#target_args[@]}" -eq 0 ]; then
-              echo "No requested revoke targets exist in state. Creating refresh-only no-op plan."
-              terraform -chdir=terraform plan \
-                -lock-timeout=10m \
-                -refresh-only \
-                -var-file="../$TFVARS_JSON" \
-                -out="../$TFPLAN_BIN"
+              target_args=()
+              missing_targets=()
+              for t in "${TARGETS[@]}"; do
+                if ! printf '%s\n' "${STATE_ADDRS[@]}" | grep -Fx -- "$t" >/dev/null; then
+                  import_id="${TARGET_IMPORT_ID[$t]:-}"
+                  if [ -n "$import_id" ]; then
+                    echo "Target not in state. Attempting import for revoke: $import_id"
+                    if terraform -chdir=terraform import -var-file="../$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
+                      echo "Imported missing target into state: $t"
+                      target_args+=("-target=$t")
+                      continue
+                    else
+                      echo "Import failed for target: $t"
+                    fi
+                  fi
+                  missing_targets+=("$t")
+                  continue
+                fi
+                target_args+=("-target=$t")
+              done
+
+              if [ "${#missing_targets[@]}" -gt 0 ]; then
+                echo "Skipping revoke targets not found in backend state ($TF_BACKEND_KEY):"
+                printf ' - %s\n' "${missing_targets[@]}"
+                echo "Continuing with targets that are present in state."
+              fi
+
+              if [ "${#target_args[@]}" -eq 0 ]; then
+                echo "No requested revoke targets exist in state. Creating refresh-only no-op plan."
+                terraform -chdir=terraform plan \
+                  -lock-timeout=10m \
+                  -refresh-only \
+                  -var-file="../$TFVARS_JSON" \
+                  -out="../$TFPLAN_BIN"
+              else
+                terraform -chdir=terraform plan \
+                  -lock-timeout=10m \
+                  -destroy \
+                  -var-file="../$TFVARS_JSON" \
+                  "${target_args[@]}" \
+                  -out="../$TFPLAN_BIN"
+              fi
             else
               terraform -chdir=terraform plan \
                 -lock-timeout=10m \
-                -destroy \
                 -var-file="../$TFVARS_JSON" \
-                "${target_args[@]}" \
                 -out="../$TFPLAN_BIN"
             fi
-          else
-            terraform -chdir=terraform plan \
-              -lock-timeout=10m \
-              -var-file="../$TFVARS_JSON" \
-              -out="../$TFPLAN_BIN"
-          fi
 
-          if [ "$REQUEST_ACTIVITY" = "ADD" ] && grep -q "Saved plan is stale" "$apply_log"; then
-            terraform -chdir=terraform plan \
-              -lock-timeout=10m \
-              -var-file="../$TFVARS_JSON" \
-              -out="../$TFPLAN_BIN"
-          fi
-
-          if grep -q "Saved plan is stale" "$apply_log"; then
             terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
           fi
           fi

@@ -18,6 +18,14 @@ def _normalize(value: Any) -> str:
 	return str(value).strip()
 
 
+def _normalize_principal(value: str) -> str:
+	# Databricks principal emails are case-insensitive; normalize to lowercase
+	# to avoid plan/apply churn like manoj@ vs Manoj@.
+	if "@" in value:
+		return value.lower()
+	return value
+
+
 def _load_json(path: Path) -> dict[str, Any]:
 	with path.open("r", encoding="utf-8") as handle:
 		payload = json.load(handle)
@@ -42,7 +50,7 @@ def _terraform_record(record: dict[str, Any]) -> dict[str, Any]:
 		"activity": _normalize(record.get("activity")).upper(),
 		"environment": _normalize(record.get("environment")).upper(),
 		"access_for": _normalize(record.get("access_for")).lower(),
-		"principal_name": _normalize(record.get("principal_name")),
+		"principal_name": _normalize_principal(_normalize(record.get("principal_name"))),
 		"object_type": _normalize(record.get("object_type")).upper(),
 		"catalog": _normalize(record.get("catalog")),
 		"schema": _normalize(record.get("schema")),
@@ -86,10 +94,15 @@ def build_tfvars_payload(parsed_payload: dict[str, Any]) -> dict[str, Any]:
 		)
 
 	environment = environments[0] if environments else _normalize(parsed_payload.get("environment")).upper()
+	activities = sorted({r["activity"] for r in terraform_records if r["activity"]})
+	access_for_types = sorted({r["access_for"] for r in terraform_records if r["access_for"]})
 
 	return {
 		"request_id": _normalize(parsed_payload.get("request_id")),
 		"environment": environment,
+		"record_count": len(terraform_records),
+		"activities": activities,
+		"access_for_types": access_for_types,
 		"object_access_records": terraform_records,
 	}
 

@@ -7,10 +7,8 @@ Terraform plan/apply execution.
 from __future__ import annotations
 
 import argparse
-import importlib
 import os
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,44 +18,28 @@ try:
 except ImportError as exc:  # pragma: no cover - runtime dependency
 	raise SystemExit("PyYAML is required. Install with: pip install pyyaml") from exc
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+	sys.path.insert(0, str(SCRIPT_DIR))
+
 try:
-	from openpyxl import Workbook, load_workbook
+	from template_common import (  # pylint: disable=import-error
+		COMPACT_REQUIRED_COLUMNS,
+		HEADER_ALIASES,
+		REQUIRED_COLUMNS,
+		extract_headers_and_start_row,
+		header_key,
+		load_workbook_compat,
+		merge_context,
+		normalize,
+		normalize_environment,
+		read_workbook_context,
+		select_required_columns,
+	)
 except ImportError as exc:  # pragma: no cover - runtime dependency
-	raise SystemExit("openpyxl is required. Install with: pip install openpyxl") from exc
-
-REQUIRED_COLUMNS = [
-	"Environment",
-	"Access_For",
-	"Principal_Name",
-	"Object_Type",
-	"Catalog",
-	"Schema",
-	"Object_Name",
-]
-
-COMPACT_REQUIRED_COLUMNS = ["Activity", "Catalog", "Schema", "Object_Name"]
+	raise SystemExit("Shared helpers are missing. Ensure template_common.py is present.") from exc
 
 OPTIONAL_COLUMNS = ["Record_ID", "Activity", "Folder_Path", "Privilege", "Justification", "Additional_Information"]
-
-HEADER_ALIASES = {
-	"Record_ID": {"Record_ID", "record_id"},
-	"Activity": {"Activity", "activity"},
-	"Environment": {"Environment", "ENV", "Env", "environment"},
-	"Access_For": {"Access_For", "Access_for", "access_for"},
-	"Principal_Name": {"Principal_Name", "principal_name"},
-	"Object_Type": {"Object_Type", "object_type"},
-	"Catalog": {"Catalog", "catalog", "UC Catalog"},
-	"Schema": {
-		"Schema",
-		"schema",
-		"EDL Schema Name/Folder Name (vw_*) / Sandbox Name (vw_slfsrv_*) For non-EDL / <schema name>",
-	},
-	"Object_Name": {"Object_Name", "Object", "View", "view", "object_name", "Object Name"},
-	"Folder_Path": {"Folder_Path", "folder_path"},
-	"Privilege": {"Privilege", "privilege"},
-	"Justification": {"Justification", "justification"},
-	"Additional_Information": {"Additional_Information", "additional_information"},
-}
 
 ALLOWED_ACTIVITY = {"ADD", "REMOVE", "REVOKE"}
 ALLOWED_ENV = {"DEV", "QA", "PRD"}
@@ -93,26 +75,11 @@ class ValidationError:
 	message: str
 
 
-def _normalize(value: Any) -> str:
-	if value is None:
-		return ""
-	return str(value).strip()
-
-
-def _header_key(value: str) -> str:
-	return " ".join(_normalize(value).replace("\n", " ").split()).lower()
-
-
-def _normalize_environment(value: str) -> str:
-	mapped = {
-		"PROD": "PRD",
-		"PRODUCTION": "PRD",
-		"PRD": "PRD",
-		"QA": "QA",
-		"DEV": "DEV",
-	}
-	upper = value.upper()
-	return mapped.get(upper, upper)
+def _normalize_principal_for_compare(value: str) -> str:
+	v = normalize(value)
+	if "@" in v:
+		return v.lower()
+	return v
 
 
 def _normalize_activity(value: str) -> str:
@@ -130,22 +97,21 @@ def _normalize_activity(value: str) -> str:
 
 
 def _is_blank(value: Any) -> bool:
-	return _normalize(value) == ""
+	return normalize(value) == ""
 
 
 def _default_privilege(object_type: str) -> str:
 	defaults = {
 		"CATALOG": "USE_CATALOG",
 		"SCHEMA": "USE_SCHEMA",
-		"VIEW": "SELECT"
-		
+		"VIEW": "SELECT",
 	}
 	return defaults.get(object_type.upper(), "")
 
 
 def _effective_privilege(record: dict[str, Any]) -> str:
-	object_type = _normalize(record.get("Object_Type")).upper()
-	row_privilege = _normalize(record.get("Privilege")).upper()
+	object_type = normalize(record.get("Object_Type")).upper()
+	row_privilege = normalize(record.get("Privilege")).upper()
 	return row_privilege or _default_privilege(object_type)
 
 
@@ -153,7 +119,7 @@ def _canonical_headers(raw_headers: list[str]) -> tuple[list[str], list[str]]:
 	canonical_headers: list[str] = []
 	unrecognized: list[str] = []
 	header_alias_keys: dict[str, set[str]] = {
-		canonical: {_header_key(alias) for alias in aliases}
+		canonical: {header_key(alias) for alias in aliases}
 		for canonical, aliases in HEADER_ALIASES.items()
 	}
 
@@ -163,7 +129,7 @@ def _canonical_headers(raw_headers: list[str]) -> tuple[list[str], list[str]]:
 			continue
 
 		mapped = None
-		normalized_header = _header_key(header)
+		normalized_header = header_key(header)
 		for canonical, aliases in HEADER_ALIASES.items():
 			if normalized_header in header_alias_keys[canonical]:
 				mapped = canonical
@@ -189,168 +155,66 @@ def _read_request_context(request_file: Path | None) -> dict[str, str]:
 		return {}
 
 	return {
-		"environment": _normalize(payload.get("environment")),
-		"access_for": _normalize(payload.get("access_for")),
-		"activity_type": _normalize(payload.get("activity_type")),
-		"ad_group_name": _normalize(payload.get("ad_group_name")),
-		"service_account_name": _normalize(payload.get("service_account_name")),
+		"environment": normalize(payload.get("environment")),
+		"access_for": normalize(payload.get("access_for")),
+		"activity_type": normalize(payload.get("activity_type")),
+		"ad_group_name": normalize(payload.get("ad_group_name")),
+		"service_account_name": normalize(payload.get("service_account_name")),
 	}
 
 
-def _is_placeholder(value: str) -> bool:
-	v = value.strip().lower()
-	return v.startswith("<enter") or v in {"na", "n/a", "-"}
-
-
-def _find_requestor_entry_col(sheet: Any) -> int | None:
-	for row in sheet.iter_rows(min_row=1, max_row=30, values_only=True):
-		for idx, cell in enumerate([_normalize(v) for v in row]):
-			if "requestor entry info" in _header_key(cell):
-				return idx
-	return None
-
-
-def _value_right_of_label(sheet: Any, label_matchers: list[str], requestor_col: int | None = None, prefer_email: bool = False) -> str:
-	for row in sheet.iter_rows(values_only=True):
-		row_values = [_normalize(v) for v in row]
-		for idx, cell in enumerate(row_values):
-			cell_key = _header_key(cell)
-			if any(m in cell_key for m in label_matchers):
-				if requestor_col is not None and requestor_col < len(row_values):
-					entry_val = row_values[requestor_col]
-					if entry_val and not _is_placeholder(entry_val):
-						if not prefer_email or "@" in entry_val:
-							return entry_val
-				for nxt in row_values[idx + 1 :]:
-					if nxt and not _is_placeholder(nxt):
-						if prefer_email and "@" not in nxt:
-							continue
-						return nxt
-	return ""
-
-
 def _read_workbook_context(template_file: Path) -> dict[str, str]:
-	try:
-		workbook, tmp_path = _load_workbook_compat(template_file)
-	except Exception:  # pylint: disable=broad-except
-		return {}
-
-	try:
-		environment = ""
-		activity_type = ""
-		ad_group_name = ""
-		service_account_name = ""
-
-		for sheet in workbook.worksheets:
-			requestor_col = _find_requestor_entry_col(sheet)
-			if not environment:
-				environment = _value_right_of_label(sheet, ["environment"], requestor_col=requestor_col)
-			if not activity_type:
-				activity_type = _value_right_of_label(sheet, ["request type", "activity"], requestor_col=requestor_col)
-			if not ad_group_name:
-				ad_group_name = _value_right_of_label(
-					sheet,
-					["dtb ad group name", "ad group name"],
-					requestor_col=requestor_col,
-					prefer_email=True,
-				)
-			if not service_account_name:
-				service_account_name = _value_right_of_label(
-					sheet,
-					["service account name"],
-					requestor_col=requestor_col,
-					prefer_email=True,
-				)
-
-			if environment and activity_type and (ad_group_name or service_account_name):
-				break
-
-		access_for = ""
-		if ad_group_name:
-			access_for = "ad_group"
-		elif service_account_name:
-			access_for = "service_account"
-
-		return {
-			"environment": _normalize_environment(environment),
-			"access_for": access_for,
-			"activity_type": _normalize_activity(activity_type),
-			"ad_group_name": ad_group_name,
-			"service_account_name": service_account_name,
-		}
-	finally:
-		if tmp_path:
-			try:
-				os.unlink(tmp_path)
-			except OSError:
-				pass
+	context = read_workbook_context(template_file, _normalize_activity, swallow_errors=True)
+	return {
+		"environment": context.get("environment", ""),
+		"access_for": context.get("access_for", ""),
+		"activity_type": context.get("activity_type", ""),
+		"ad_group_name": context.get("ad_group_name", ""),
+		"service_account_name": context.get("service_account_name", ""),
+	}
 
 
-def _merge_context(primary: dict[str, str], fallback: dict[str, str]) -> dict[str, str]:
-	merged = dict(fallback)
-	for key, value in primary.items():
-		if _normalize(value):
-			merged[key] = value
-	return merged
+def _build_not_found_error(template_file: Path) -> list[ValidationError]:
+	return [
+		ValidationError(
+			code="TPL-001",
+			row=0,
+			field="template_file",
+			message=f"Template file not found: {template_file}",
+		)
+	]
 
 
-def _load_workbook_compat(template_file: Path) -> tuple[Any, str | None]:
-	# First try openpyxl regardless of file extension. This handles files whose
-	# extension is .xls but content is actually OOXML (.xlsx).
-	try:
-		return load_workbook(filename=template_file, data_only=True), None
-	except Exception as xlsx_exc:  # pylint: disable=broad-except
-		if template_file.suffix.lower() != ".xls":
-			raise ValueError(f"Template file unreadable as xlsx: {xlsx_exc}") from xlsx_exc
+def _build_unreadable_error(exc: Exception) -> list[ValidationError]:
+	return [
+		ValidationError(
+			code="TPL-001",
+			row=0,
+			field="template_file",
+			message=f"Template file unreadable: {exc}",
+		)
+	]
 
-	try:
-		xlrd = importlib.import_module("xlrd")
-	except ModuleNotFoundError as exc:
-		raise SystemExit("xlrd is required for .xls support. Install with: pip install xlrd")
 
-	try:
-		xls_book = xlrd.open_workbook(str(template_file))
-	except Exception as xls_exc:  # pylint: disable=broad-except
-		raise ValueError(f"Template file unreadable as xls: {xls_exc}") from xls_exc
-	xlsx_book = Workbook()
-	xlsx_book.remove(xlsx_book.active)
-
-	for sheet_name in xls_book.sheet_names():
-		xls_sheet = xls_book.sheet_by_name(sheet_name)
-		xlsx_sheet = xlsx_book.create_sheet(title=sheet_name[:31] or "Sheet")
-		for row_idx in range(xls_sheet.nrows):
-			for col_idx in range(xls_sheet.ncols):
-				xlsx_sheet.cell(row=row_idx + 1, column=col_idx + 1, value=xls_sheet.cell_value(row_idx, col_idx))
-
-	with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as handle:
-		tmp_path = handle.name
-
-	xlsx_book.save(tmp_path)
-	return load_workbook(filename=tmp_path, data_only=True), tmp_path
+def _build_missing_columns_error(missing: list[str]) -> list[ValidationError]:
+	return [
+		ValidationError(
+			code="TPL-003",
+			row=1,
+			field="columns",
+			message=f"Missing required columns: {', '.join(missing)}",
+		)
+	]
 
 
 def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any]], list[ValidationError]]:
 	if not template_file.exists():
-		return [], [
-			ValidationError(
-				code="TPL-001",
-				row=0,
-				field="template_file",
-				message=f"Template file not found: {template_file}",
-			)
-		]
+		return [], _build_not_found_error(template_file)
 
 	try:
-		workbook, tmp_path = _load_workbook_compat(template_file)
+		workbook, tmp_path = load_workbook_compat(template_file)
 	except Exception as exc:  # pylint: disable=broad-except
-		return [], [
-			ValidationError(
-				code="TPL-001",
-				row=0,
-				field="template_file",
-				message=f"Template file unreadable: {exc}",
-			)
-		]
+		return [], _build_unreadable_error(exc)
 
 	try:
 		if sheet_name not in workbook.sheetnames:
@@ -364,28 +228,11 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 			]
 
 		sheet = workbook[sheet_name]
-		header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
-		raw_headers = [_normalize(v) for v in (header_cells or [])]
-		if _header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
-			header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
-			raw_headers = [_normalize(v) for v in (header_cells or [])]
-			min_row = 3
-		else:
-			min_row = 2
-		headers, _ = _canonical_headers(raw_headers)
-
-		is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
-		required_columns = COMPACT_REQUIRED_COLUMNS if is_compact_format else REQUIRED_COLUMNS
+		headers, min_row = extract_headers_and_start_row(sheet, lambda raw: _canonical_headers(raw)[0])
+		required_columns = select_required_columns(headers, COMPACT_REQUIRED_COLUMNS, REQUIRED_COLUMNS)
 		missing = [c for c in required_columns if c not in headers]
 		if missing:
-			return [], [
-				ValidationError(
-					code="TPL-003",
-					row=1,
-					field="columns",
-					message=f"Missing required columns: {', '.join(missing)}",
-				)
-			]
+			return [], _build_missing_columns_error(missing)
 
 		records: list[dict[str, Any]] = []
 		for row_idx, row_values in enumerate(sheet.iter_rows(min_row=min_row, values_only=True), start=min_row):
@@ -408,16 +255,16 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 def _hydrate_record(record: dict[str, Any], request_context: dict[str, str]) -> dict[str, Any]:
 	hydrated = dict(record)
 
-	row_activity = _normalize(hydrated.get("Activity"))
+	row_activity = normalize(hydrated.get("Activity"))
 	hydrated["Activity"] = _normalize_activity(row_activity or request_context.get("activity_type", ""))
 
-	row_environment = _normalize(hydrated.get("Environment"))
-	hydrated["Environment"] = _normalize_environment(row_environment or request_context.get("environment", ""))
+	row_environment = normalize(hydrated.get("Environment"))
+	hydrated["Environment"] = normalize_environment(row_environment or request_context.get("environment", ""))
 
-	row_access_for = _normalize(hydrated.get("Access_For")).lower()
+	row_access_for = normalize(hydrated.get("Access_For")).lower()
 	hydrated["Access_For"] = row_access_for or request_context.get("access_for", "")
 
-	row_principal = _normalize(hydrated.get("Principal_Name"))
+	row_principal = normalize(hydrated.get("Principal_Name"))
 	expected_principal = ""
 	if hydrated["Access_For"] == "ad_group":
 		expected_principal = request_context.get("ad_group_name", "")
@@ -425,12 +272,12 @@ def _hydrate_record(record: dict[str, Any], request_context: dict[str, str]) -> 
 		expected_principal = request_context.get("service_account_name", "")
 	hydrated["Principal_Name"] = row_principal or expected_principal
 
-	catalog = _normalize(hydrated.get("Catalog"))
-	schema = _normalize(hydrated.get("Schema"))
-	object_name = _normalize(hydrated.get("Object_Name"))
-	folder_path = _normalize(hydrated.get("Folder_Path"))
+	catalog = normalize(hydrated.get("Catalog"))
+	schema = normalize(hydrated.get("Schema"))
+	object_name = normalize(hydrated.get("Object_Name"))
+	folder_path = normalize(hydrated.get("Folder_Path"))
 
-	object_type = _normalize(hydrated.get("Object_Type")).upper()
+	object_type = normalize(hydrated.get("Object_Type")).upper()
 	if object_type == "":
 		if folder_path != "":
 			object_type = "FOLDER"
@@ -462,7 +309,7 @@ def _validate_row_required(record: dict[str, Any], request_context: dict[str, st
 				)
 			)
 
-	activity = _normalize(record.get("Activity"))
+	activity = normalize(record.get("Activity"))
 	if activity == "" and request_context.get("activity_type", "") == "":
 		errors.append(
 			ValidationError(
@@ -490,7 +337,7 @@ def _validate_row_enums(record: dict[str, Any], request_context: dict[str, str])
 	errors: list[ValidationError] = []
 	row_no = record["_row"]
 
-	activity = _normalize(record.get("Activity"))
+	activity = normalize(record.get("Activity"))
 	if activity == "":
 		activity = request_context.get("activity_type", "")
 	if activity and activity.upper() not in ALLOWED_ACTIVITY:
@@ -503,7 +350,7 @@ def _validate_row_enums(record: dict[str, Any], request_context: dict[str, str])
 			)
 		)
 
-	environment = _normalize(record.get("Environment")).upper()
+	environment = normalize(record.get("Environment")).upper()
 	if environment and environment not in ALLOWED_ENV:
 		errors.append(
 			ValidationError(
@@ -514,7 +361,7 @@ def _validate_row_enums(record: dict[str, Any], request_context: dict[str, str])
 			)
 		)
 
-	access_for = _normalize(record.get("Access_For")).lower()
+	access_for = normalize(record.get("Access_For")).lower()
 	if access_for and access_for not in ALLOWED_ACCESS_FOR:
 		errors.append(
 			ValidationError(
@@ -525,7 +372,7 @@ def _validate_row_enums(record: dict[str, Any], request_context: dict[str, str])
 			)
 		)
 
-	object_type = _normalize(record.get("Object_Type")).upper()
+	object_type = normalize(record.get("Object_Type")).upper()
 	if object_type and object_type not in ALLOWED_OBJECT_TYPES:
 		errors.append(
 			ValidationError(
@@ -542,12 +389,12 @@ def _validate_row_enums(record: dict[str, Any], request_context: dict[str, str])
 def _validate_conditional_fields(record: dict[str, Any]) -> list[ValidationError]:
 	errors: list[ValidationError] = []
 	row_no = record["_row"]
-	object_type = _normalize(record.get("Object_Type")).upper()
+	object_type = normalize(record.get("Object_Type")).upper()
 
-	catalog = _normalize(record.get("Catalog"))
-	schema = _normalize(record.get("Schema"))
-	object_name = _normalize(record.get("Object_Name"))
-	folder_path = _normalize(record.get("Folder_Path"))
+	catalog = normalize(record.get("Catalog"))
+	schema = normalize(record.get("Schema"))
+	object_name = normalize(record.get("Object_Name"))
+	folder_path = normalize(record.get("Folder_Path"))
 
 	if object_type == "CATALOG":
 		if catalog == "" or schema or object_name or folder_path:
@@ -598,7 +445,7 @@ def _validate_conditional_fields(record: dict[str, Any]) -> list[ValidationError
 
 def _validate_privilege(record: dict[str, Any]) -> list[ValidationError]:
 	row_no = record["_row"]
-	object_type = _normalize(record.get("Object_Type")).upper()
+	object_type = normalize(record.get("Object_Type")).upper()
 	privilege = _effective_privilege(record)
 
 	if object_type not in ALLOWED_PRIVILEGES:
@@ -624,9 +471,9 @@ def _validate_cross_field_consistency(record: dict[str, Any], request_context: d
 	errors: list[ValidationError] = []
 	row_no = record["_row"]
 
-	row_env = _normalize(record.get("Environment")).upper()
-	row_access_for = _normalize(record.get("Access_For")).lower()
-	row_principal = _normalize(record.get("Principal_Name"))
+	row_env = normalize(record.get("Environment")).upper()
+	row_access_for = normalize(record.get("Access_For")).lower()
+	row_principal = normalize(record.get("Principal_Name"))
 
 	expected_env = request_context.get("environment", "")
 	expected_access_for = request_context.get("access_for", "")
@@ -660,7 +507,7 @@ def _validate_cross_field_consistency(record: dict[str, Any], request_context: d
 	elif expected_access_for == "service_account":
 		expected_principal = request_context.get("service_account_name", "")
 
-	if expected_principal and row_principal and row_principal != expected_principal:
+	if expected_principal and row_principal and _normalize_principal_for_compare(row_principal) != _normalize_principal_for_compare(expected_principal):
 		errors.append(
 			ValidationError(
 				code="TPL-008",
@@ -681,7 +528,7 @@ def _validate_duplicates(records: list[dict[str, Any]], request_context: dict[st
 	seen: dict[tuple[str, ...], int] = {}
 
 	for record in records:
-		activity = _normalize(record.get("Activity"))
+		activity = normalize(record.get("Activity"))
 		if activity == "":
 			activity = request_context.get("activity_type", "")
 
@@ -690,15 +537,15 @@ def _validate_duplicates(records: list[dict[str, Any]], request_context: dict[st
 			if field == "Activity":
 				key_parts.append(activity.upper())
 			elif field == "Environment":
-				key_parts.append(_normalize(record.get(field)).upper())
+				key_parts.append(normalize(record.get(field)).upper())
 			elif field == "Access_For":
-				key_parts.append(_normalize(record.get(field)).lower())
+				key_parts.append(normalize(record.get(field)).lower())
 			elif field == "Object_Type":
-				key_parts.append(_normalize(record.get(field)).upper())
+				key_parts.append(normalize(record.get(field)).upper())
 			elif field == "Privilege":
 				key_parts.append(_effective_privilege(record))
 			else:
-				key_parts.append(_normalize(record.get(field)))
+				key_parts.append(normalize(record.get(field)))
 
 		key = tuple(key_parts)
 		if key in seen:
@@ -718,7 +565,7 @@ def _validate_duplicates(records: list[dict[str, Any]], request_context: dict[st
 
 
 def _effective_activity(record: dict[str, Any], request_context: dict[str, str]) -> str:
-	activity = _normalize(record.get("Activity"))
+	activity = normalize(record.get("Activity"))
 	if activity == "":
 		activity = request_context.get("activity_type", "")
 	effective = activity.upper()
@@ -742,12 +589,12 @@ def _validate_add_prerequisites(records: list[dict[str, Any]], request_context: 
 		if _effective_activity(record, request_context) != "ADD":
 			continue
 
-		env = _normalize(record.get("Environment")).upper()
-		access_for = _normalize(record.get("Access_For")).lower()
-		principal = _normalize(record.get("Principal_Name")).lower()
-		catalog = _normalize(record.get("Catalog"))
-		schema = _normalize(record.get("Schema"))
-		object_type = _normalize(record.get("Object_Type")).upper()
+		env = normalize(record.get("Environment")).upper()
+		access_for = normalize(record.get("Access_For")).lower()
+		principal = normalize(record.get("Principal_Name")).lower()
+		catalog = normalize(record.get("Catalog"))
+		schema = normalize(record.get("Schema"))
+		object_type = normalize(record.get("Object_Type")).upper()
 
 		catalog_key = (env, access_for, principal, catalog)
 		schema_key = (env, access_for, principal, catalog, schema)
@@ -840,7 +687,7 @@ def validate_template_file(
 ) -> list[ValidationError]:
 	request_context = _read_request_context(request_file)
 	workbook_context = _read_workbook_context(template_file)
-	request_context = _merge_context(request_context, workbook_context)
+	request_context = merge_context(request_context, workbook_context)
 
 	rows, load_errors = _load_rows(template_file, sheet_name)
 	if load_errors:
@@ -905,3 +752,4 @@ def main() -> int:
 
 if __name__ == "__main__":
 	sys.exit(main())
+
