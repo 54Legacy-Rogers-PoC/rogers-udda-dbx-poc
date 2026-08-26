@@ -221,8 +221,10 @@ jobs:
             exit 0
           fi
 
-          python uda/scripts/object-access/build_import_tfvars.py \
-            --input-json "$TFVARS_JSON"
+          (
+            cd "$OUTPUT_DIR"
+            python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_import_tfvars.py"
+          )
 
       - name: Terraform init (with retry)
         shell: bash

@@ -11,9 +11,8 @@ import json
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-ALLOWED_OUTPUT_ROOT = (REPO_ROOT / "uda" / "output" / "object-access").resolve()
 ALLOWED_INPUT_NAME = "object-access.auto.tfvars.json"
+ALLOWED_OUTPUT_NAME = "object-access-import.auto.tfvars.json"
 
 
 def build_import_tfvars(src: Path, dst: Path) -> int:
@@ -35,35 +34,40 @@ def build_import_tfvars(src: Path, dst: Path) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build import tfvars for REMOVE/REVOKE rows")
-    parser.add_argument("--input-json", required=True, help="Path to object-access.auto.tfvars.json")
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Validate input/output location and exit without writing output",
+    )
     return parser.parse_args()
 
 
-def _resolve_input_json(path_input: str) -> Path:
-    src = Path(path_input).resolve()
-    if src.name != ALLOWED_INPUT_NAME:
-        raise ValueError(f"Input file must be named {ALLOWED_INPUT_NAME}: {path_input}")
-    if ALLOWED_OUTPUT_ROOT not in src.parents:
-        raise ValueError(f"Input path must be under {ALLOWED_OUTPUT_ROOT}")
+def _resolve_input_json() -> Path:
+    src = Path.cwd() / ALLOWED_INPUT_NAME
     if not src.is_file():
-        raise ValueError(f"Input file not found: {path_input}")
-    return src
+        raise ValueError(f"Input file not found in current directory: {src}")
+    return src.resolve()
 
 
 def _derived_output_path(src: Path) -> Path:
     # Keep output naming deterministic and not user-controlled.
-    return src.with_name("object-access-import.auto.tfvars.json")
+    return src.with_name(ALLOWED_OUTPUT_NAME)
 
 
 def main() -> int:
     args = parse_args()
     try:
-        src = _resolve_input_json(args.input_json)
+        src = _resolve_input_json()
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
     dst = _derived_output_path(src)
+    if args.verify_only:
+        print(f"Input validated: {src}")
+        print(f"Output target: {dst}")
+        return 0
+
     dst.parent.mkdir(parents=True, exist_ok=True)
     count = build_import_tfvars(src, dst)
     print(f"Import tfvars written: {dst}")

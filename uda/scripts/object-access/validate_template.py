@@ -7,6 +7,8 @@ Terraform plan/apply execution.
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,8 +28,19 @@ try:
 		normalize_environment,
 		read_workbook_context,
 	)
-except ImportError as exc:  # pragma: no cover - runtime dependency
-	raise SystemExit("Shared helpers are missing. Ensure template_common.py is present.") from exc
+except ImportError:  # pragma: no cover - runtime dependency
+	module_path = Path(__file__).with_name("template_common.py")
+	spec = importlib.util.spec_from_file_location("template_common", module_path)
+	if spec is None or spec.loader is None:
+		raise SystemExit("Shared helpers are missing. Ensure template_common.py is present.")
+	module = importlib.util.module_from_spec(spec)
+	spec.loader.exec_module(module)
+	header_key = module.header_key
+	load_workbook_compat = module.load_workbook_compat
+	merge_context = module.merge_context
+	normalize = module.normalize
+	normalize_environment = module.normalize_environment
+	read_workbook_context = module.read_workbook_context
 
 REQUIRED_COLUMNS = [
 	"Environment",
@@ -126,8 +139,7 @@ def _default_privilege(object_type: str) -> str:
 	defaults = {
 		"CATALOG": "USE_CATALOG",
 		"SCHEMA": "USE_SCHEMA",
-		"VIEW": "SELECT"
-		
+		"VIEW": "SELECT",
 	}
 	return defaults.get(object_type.upper(), "")
 
@@ -197,28 +209,64 @@ def _read_workbook_context(template_file: Path) -> dict[str, str]:
 	}
 
 
+def _build_not_found_error(template_file: Path) -> list[ValidationError]:
+	return [
+		ValidationError(
+			code="TPL-001",
+			row=0,
+			field="template_file",
+			message=f"Template file not found: {template_file}",
+		)
+	]
+
+
+def _build_unreadable_error(exc: Exception) -> list[ValidationError]:
+	return [
+		ValidationError(
+			code="TPL-001",
+			row=0,
+			field="template_file",
+			message=f"Template file unreadable: {exc}",
+		)
+	]
+
+
+def _extract_headers_and_start_row(sheet: Any) -> tuple[list[str], int]:
+	header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+	raw_headers = [normalize(v) for v in (header_cells or [])]
+	if header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
+		header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
+		raw_headers = [normalize(v) for v in (header_cells or [])]
+		headers, _ = _canonical_headers(raw_headers)
+		return headers, 3
+	headers, _ = _canonical_headers(raw_headers)
+	return headers, 2
+
+
+def _compute_required_columns(headers: list[str]) -> list[str]:
+	is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
+	return COMPACT_REQUIRED_COLUMNS if is_compact_format else REQUIRED_COLUMNS
+
+
+def _build_missing_columns_error(missing: list[str]) -> list[ValidationError]:
+	return [
+		ValidationError(
+			code="TPL-003",
+			row=1,
+			field="columns",
+			message=f"Missing required columns: {', '.join(missing)}",
+		)
+	]
+
+
 def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any]], list[ValidationError]]:
 	if not template_file.exists():
-		return [], [
-			ValidationError(
-				code="TPL-001",
-				row=0,
-				field="template_file",
-				message=f"Template file not found: {template_file}",
-			)
-		]
+		return [], _build_not_found_error(template_file)
 
 	try:
 		workbook, tmp_path = load_workbook_compat(template_file)
 	except Exception as exc:  # pylint: disable=broad-except
-		return [], [
-			ValidationError(
-				code="TPL-001",
-				row=0,
-				field="template_file",
-				message=f"Template file unreadable: {exc}",
-			)
-		]
+		return [], _build_unreadable_error(exc)
 
 	try:
 		if sheet_name not in workbook.sheetnames:
@@ -232,28 +280,11 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 			]
 
 		sheet = workbook[sheet_name]
-		header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
-		raw_headers = [normalize(v) for v in (header_cells or [])]
-		if header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
-			header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
-			raw_headers = [normalize(v) for v in (header_cells or [])]
-			min_row = 3
-		else:
-			min_row = 2
-		headers, _ = _canonical_headers(raw_headers)
-
-		is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
-		required_columns = COMPACT_REQUIRED_COLUMNS if is_compact_format else REQUIRED_COLUMNS
+		headers, min_row = _extract_headers_and_start_row(sheet)
+		required_columns = _compute_required_columns(headers)
 		missing = [c for c in required_columns if c not in headers]
 		if missing:
-			return [], [
-				ValidationError(
-					code="TPL-003",
-					row=1,
-					field="columns",
-					message=f"Missing required columns: {', '.join(missing)}",
-				)
-			]
+			return [], _build_missing_columns_error(missing)
 
 		records: list[dict[str, Any]] = []
 		for row_idx, row_values in enumerate(sheet.iter_rows(min_row=min_row, values_only=True), start=min_row):

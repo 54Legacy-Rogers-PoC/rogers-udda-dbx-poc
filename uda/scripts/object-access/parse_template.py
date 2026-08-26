@@ -7,7 +7,9 @@ used by tfvars generation and Terraform provisioning stages.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,8 +28,19 @@ try:
 		normalize_environment,
 		read_workbook_context,
 	)
-except ImportError as exc:  # pragma: no cover - runtime dependency
-	raise SystemExit("Shared helpers are missing. Ensure template_common.py is present.") from exc
+except ImportError:  # pragma: no cover - runtime dependency
+	module_path = Path(__file__).with_name("template_common.py")
+	spec = importlib.util.spec_from_file_location("template_common", module_path)
+	if spec is None or spec.loader is None:
+		raise SystemExit("Shared helpers are missing. Ensure template_common.py is present.")
+	module = importlib.util.module_from_spec(spec)
+	spec.loader.exec_module(module)
+	header_key = module.header_key
+	load_workbook_compat = module.load_workbook_compat
+	merge_context = module.merge_context
+	normalize = module.normalize
+	normalize_environment = module.normalize_environment
+	read_workbook_context = module.read_workbook_context
 
 REQUIRED_COLUMNS = [
 	"Environment",
@@ -125,7 +138,6 @@ def _read_request_context(request_file: Path | None) -> dict[str, str]:
 		return {}
 
 	access_for = normalize(payload.get("access_for")).lower()
-	access_for = normalize(payload.get("access_for")).lower()
 	principal_name = ""
 	if access_for == "ad_group":
 		principal_name = normalize(payload.get("ad_group_name"))
@@ -152,6 +164,21 @@ def _read_workbook_context(template_file: Path) -> dict[str, str]:
 	}
 
 
+def _get_headers_and_start_row(sheet: Any) -> tuple[list[str], int]:
+	header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+	raw_headers = [normalize(v) for v in (header_cells or [])]
+	if header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
+		header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
+		raw_headers = [normalize(v) for v in (header_cells or [])]
+		return _canonical_headers(raw_headers), 3
+	return _canonical_headers(raw_headers), 2
+
+
+def _required_columns(headers: list[str]) -> list[str]:
+	is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
+	return COMPACT_REQUIRED_COLUMNS if is_compact_format else REQUIRED_COLUMNS
+
+
 def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any]], list[str]]:
 	if not template_file.exists():
 		raise FileNotFoundError(f"Template file not found: {template_file}")
@@ -162,18 +189,8 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 			raise ValueError(f"Worksheet not found: {sheet_name}")
 
 		sheet = workbook[sheet_name]
-		header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
-		raw_headers = [normalize(v) for v in (header_cells or [])]
-		if header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
-			header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
-			raw_headers = [normalize(v) for v in (header_cells or [])]
-			min_row = 3
-		else:
-			min_row = 2
-		headers = _canonical_headers(raw_headers)
-
-		is_compact_format = not ({"Access_For", "Principal_Name", "Object_Type"} & set(headers))
-		required_columns = COMPACT_REQUIRED_COLUMNS if is_compact_format else REQUIRED_COLUMNS
+		headers, min_row = _get_headers_and_start_row(sheet)
+		required_columns = _required_columns(headers)
 		missing = [column for column in required_columns if column not in headers]
 		if missing:
 			raise ValueError(f"Missing required columns: {', '.join(missing)}")
