@@ -257,7 +257,7 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 			]
 
 		sheet = workbook[sheet_name]
-		headers, min_row = extract_headers_and_start_row(sheet, _canonical_headers)
+		headers, min_row = extract_headers_and_start_row(sheet, lambda raw: _canonical_headers(raw)[0])
 		required_columns = select_required_columns(headers, COMPACT_REQUIRED_COLUMNS, REQUIRED_COLUMNS)
 		missing = [c for c in required_columns if c not in headers]
 		if missing:
