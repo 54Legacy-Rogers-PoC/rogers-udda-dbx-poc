@@ -109,6 +109,22 @@ jobs:
             printf -v "$out_var" '%s' "$value"
           }
 
+          get_kv_secret_fallback() {
+            local out_var="$1"
+            shift
+            local names=("$@")
+            local value=""
+            for secret_name in "${names[@]}"; do
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
+              if [ -n "$value" ]; then
+                printf -v "$out_var" '%s' "$value"
+                return 0
+              fi
+            done
+            echo "Missing Key Vault secret. Tried names: ${names[*]}" >&2
+            exit 1
+          }
+
           get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
           get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID
@@ -117,7 +133,7 @@ jobs:
           get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP
           get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT
           get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA
-          get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY
+          get_kv_secret_fallback TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
@@ -428,6 +444,22 @@ jobs:
             printf -v "$out_var" '%s' "$value"
           }
 
+          get_kv_secret_fallback() {
+            local out_var="$1"
+            shift
+            local names=("$@")
+            local value=""
+            for secret_name in "${names[@]}"; do
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
+              if [ -n "$value" ]; then
+                printf -v "$out_var" '%s' "$value"
+                return 0
+              fi
+            done
+            echo "Missing Key Vault secret. Tried names: ${names[*]}" >&2
+            exit 1
+          }
+
           get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
           get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID
@@ -436,7 +468,7 @@ jobs:
           get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP
           get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT
           get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA
-          get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY
+          get_kv_secret_fallback TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
