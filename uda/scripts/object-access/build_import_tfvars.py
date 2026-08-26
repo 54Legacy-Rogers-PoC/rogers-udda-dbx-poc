@@ -14,8 +14,15 @@ INPUT_FILE_NAME = "object-access.auto.tfvars.json"
 OUTPUT_FILE_NAME = "object-access-import.auto.tfvars.json"
 
 
-def build_import_tfvars() -> int:
-    payload = json.loads(open(INPUT_FILE_NAME, "r", encoding="utf-8").read())
+def _load_payload() -> dict:
+    with open(INPUT_FILE_NAME, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError("Input JSON root must be an object")
+    return payload
+
+
+def build_import_tfvars(payload: dict) -> int:
     records = payload.get("object_access_records", [])
 
     import_records = []
@@ -45,10 +52,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        with open(INPUT_FILE_NAME, "r", encoding="utf-8"):
-            pass
-    except OSError as exc:
-        print(f"Input file not found in current directory: {INPUT_FILE_NAME} ({exc})", file=sys.stderr)
+        payload = _load_payload()
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"Unable to load input file {INPUT_FILE_NAME}: {exc}", file=sys.stderr)
         return 2
 
     if args.verify_only:
@@ -56,7 +62,7 @@ def main() -> int:
         print(f"Output target: {OUTPUT_FILE_NAME}")
         return 0
 
-    count = build_import_tfvars()
+    count = build_import_tfvars(payload)
     print(f"Import tfvars written: {OUTPUT_FILE_NAME}")
     print(f"Import target rows: {count}")
     return 0
