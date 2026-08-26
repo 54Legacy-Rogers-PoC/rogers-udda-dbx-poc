@@ -64,21 +64,22 @@ jobs:
         run: |
           bash uda/scripts/object-access/collect_template_files.sh
 
-  load-runtime-secrets:
-    needs: detect-templates
-    if: ${{ needs.detect-templates.outputs.has_templates == 'true' }}
+  plan-object-access:
+    needs: [detect-templates]
+    if: ${{ needs.detect-templates.outputs.has_templates == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
     runs-on: ubuntu-latest
-    outputs:
-      databricks_host: ${{ steps.kv.outputs.databricks_host }}
-      databricks_client_id: ${{ steps.kv.outputs.databricks_client_id }}
-      databricks_client_secret: ${{ steps.kv.outputs.databricks_client_secret }}
-      tf_backend_resource_group_name: ${{ steps.kv.outputs.tf_backend_resource_group_name }}
-      tf_backend_storage_account_name: ${{ steps.kv.outputs.tf_backend_storage_account_name }}
-      tf_backend_container_name: ${{ steps.kv.outputs.tf_backend_container_name }}
-      tf_backend_access_key: ${{ steps.kv.outputs.tf_backend_access_key }}
-      tf_backend_key: ${{ steps.kv.outputs.tf_backend_key }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
+    env:
+      TEMPLATE_FILE: ${{ matrix.template_file }}
+      OUTPUT_ROOT: uda/output/object-access
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Azure login
         uses: azure/login@v2
         with:
@@ -91,7 +92,6 @@ jobs:
             }
 
       - name: Load Databricks secrets from Key Vault
-        id: kv
         shell: bash
         run: |
           set -euo pipefail
@@ -136,43 +136,19 @@ jobs:
           echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
 
           {
-            echo "databricks_host=$DATABRICKS_HOST_VALUE"
-            echo "databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE"
-            echo "databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE"
-            echo "tf_backend_resource_group_name=$TFSTATE_RESOURCE_GROUP_VALUE"
-            echo "tf_backend_storage_account_name=$TFSTATE_STORAGE_ACCOUNT_VALUE"
-            echo "tf_backend_container_name=$TFSTATE_CONTAINER_VALUE"
-            echo "tf_backend_access_key=$TFSTATE_ACCESS_KEY_VALUE"
-            echo "tf_backend_key=$TFSTATE_KEY_EFFECTIVE"
-          } >> "$GITHUB_OUTPUT"
-
-  plan-object-access:
-    needs: [detect-templates, load-runtime-secrets]
-    if: ${{ needs.detect-templates.outputs.has_templates == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
-    env:
-      TEMPLATE_FILE: ${{ matrix.template_file }}
-      OUTPUT_ROOT: uda/output/object-access
-      ARM_ACCESS_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_access_key }}
-      TF_VAR_databricks_host: ${{ needs.load-runtime-secrets.outputs.databricks_host }}
-      TF_VAR_databricks_client_id: ${{ needs.load-runtime-secrets.outputs.databricks_client_id }}
-      TF_VAR_databricks_client_secret: ${{ needs.load-runtime-secrets.outputs.databricks_client_secret }}
-      TF_BACKEND_RESOURCE_GROUP_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_resource_group_name }}
-      TF_BACKEND_STORAGE_ACCOUNT_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_storage_account_name }}
-      TF_BACKEND_CONTAINER_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_container_name }}
-      TF_BACKEND_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_key }}
-      TF_BACKEND_ACCESS_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_access_key }}
-      DATABRICKS_HOST: ${{ needs.load-runtime-secrets.outputs.databricks_host }}
-      DATABRICKS_CLIENT_ID: ${{ needs.load-runtime-secrets.outputs.databricks_client_id }}
-      DATABRICKS_CLIENT_SECRET: ${{ needs.load-runtime-secrets.outputs.databricks_client_secret }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+            echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE"
+            echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE"
+            echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE"
+            echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE"
+            echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE"
+            echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE"
+            echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE"
+            echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE"
+            echo "ARM_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE"
+            echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE"
+            echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE"
+            echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE"
+          } >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -407,7 +383,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   apply-object-access:
-    needs: [detect-templates, load-runtime-secrets, plan-object-access]
+    needs: [detect-templates, plan-object-access]
     if: ${{ needs.detect-templates.outputs.has_templates == 'true' && ((github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply)) }}
     runs-on: ubuntu-latest
     strategy:
@@ -418,22 +394,80 @@ jobs:
     env:
       TEMPLATE_FILE: ${{ matrix.template_file }}
       OUTPUT_ROOT: uda/output/object-access
-      ARM_ACCESS_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_access_key }}
-      TF_VAR_databricks_host: ${{ needs.load-runtime-secrets.outputs.databricks_host }}
-      TF_VAR_databricks_client_id: ${{ needs.load-runtime-secrets.outputs.databricks_client_id }}
-      TF_VAR_databricks_client_secret: ${{ needs.load-runtime-secrets.outputs.databricks_client_secret }}
-      TF_BACKEND_RESOURCE_GROUP_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_resource_group_name }}
-      TF_BACKEND_STORAGE_ACCOUNT_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_storage_account_name }}
-      TF_BACKEND_CONTAINER_NAME: ${{ needs.load-runtime-secrets.outputs.tf_backend_container_name }}
-      TF_BACKEND_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_key }}
-      TF_BACKEND_ACCESS_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_access_key }}
-      DATABRICKS_HOST: ${{ needs.load-runtime-secrets.outputs.databricks_host }}
-      DATABRICKS_CLIENT_ID: ${{ needs.load-runtime-secrets.outputs.databricks_client_id }}
-      DATABRICKS_CLIENT_SECRET: ${{ needs.load-runtime-secrets.outputs.databricks_client_secret }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
+
+      - name: Load Databricks secrets from Key Vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          KV="${{ secrets.KEYVAULT_NAME }}"
+
+          get_kv_secret() {
+            local out_var="$1"
+            shift
+            local names=("$@")
+            local value=""
+            for secret_name in "${names[@]}"; do
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
+              if [ -n "$value" ]; then
+                printf -v "$out_var" '%s' "$value"
+                return 0
+              fi
+            done
+            echo "Missing Key Vault secret. Tried names: ${names[*]}" >&2
+            exit 1
+          }
+
+          get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST DB-HOST
+          DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
+          get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID DATABRICKS-CLIENT-ID
+          get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET DATABRICKS-CLIENT-SECRET
+          get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID DATABRICKS-TENANT-ID
+          get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP TFSTATE-RESOURCE-GROUP-DBX-UDA
+          get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT TFSTATE-STORAGE-ACCOUNT-DBX-UDA
+          get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA TFSTATE-CONTAINER
+          get_kv_secret TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
+
+          TFSTATE_KEY_EFFECTIVE="addremove.tfstate"
+
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
+            if [ -z "${!v}" ]; then
+              echo "Missing or empty secret value for $v from Key Vault $KV" >&2
+              exit 1
+            fi
+          done
+
+          echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
+          echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
+
+          {
+            echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE"
+            echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE"
+            echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE"
+            echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE"
+            echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE"
+            echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE"
+            echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE"
+            echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE"
+            echo "ARM_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE"
+            echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE"
+            echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE"
+            echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE"
+          } >> "$GITHUB_ENV"
 
       - name: Set up Terraform
         id: setup_terraform_apply
