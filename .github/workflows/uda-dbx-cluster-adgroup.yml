@@ -1,0 +1,430 @@
+name: UDA Databricks Cluster AD Group
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_file:
+        description: Path to the Request-as-Code YAML
+        required: true
+        default: uda/requests/cluster-adgroup/dev/RITMDEVAG0001.yaml
+        type: string
+      auto_apply:
+        description: Run terraform apply after successful plan
+        required: true
+        default: false
+        type: boolean
+  push:
+    branches:
+      - main
+    paths:
+      - uda/requests/cluster-adgroup/**
+      - uda/scripts/process_cluster_adgroup_request.py
+      - uda/config/environments.yaml
+      - terraform/**
+      - .github/workflows/uda-dbx-cluster-adgroup.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate_request:
+    name: Stage 1-2 Request Validation
+    runs-on: ubuntu-latest
+    outputs:
+      request_id: ${{ steps.read_metadata.outputs.request_id }}
+      environment: ${{ steps.read_metadata.outputs.environment }}
+      activity_type: ${{ steps.read_metadata.outputs.activity_type }}
+      cluster_name: ${{ steps.read_metadata.outputs.cluster_name }}
+      ad_group_name: ${{ steps.read_metadata.outputs.ad_group_name }}
+      cluster_id: ${{ steps.read_metadata.outputs.cluster_id }}
+      cluster_permission_level: ${{ steps.read_metadata.outputs.cluster_permission_level }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r uda/scripts/requirements.txt
+
+      - name: Process cluster AD group request artifact
+        run: |
+          python uda/scripts/process_cluster_adgroup_request.py \
+            --request-file "${{ github.event.inputs.request_file || 'uda/requests/cluster-adgroup/dev/RITMDEVAG0001.yaml' }}" \
+            --config-file "uda/config/environments.yaml" \
+            --output-dir "generated"
+
+      - name: Read request metadata
+        id: read_metadata
+        run: |
+          echo "request_id=$(jq -r .request_id generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "environment=$(jq -r .environment generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "activity_type=$(jq -r .activity_type generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "cluster_name=$(jq -r .cluster_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "ad_group_name=$(jq -r .ad_group_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "cluster_id=$(jq -r .cluster_id generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "cluster_permission_level=$(jq -r .cluster_permission_level generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload generated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-cluster-adgroup-generated
+          path: |
+            generated/terraform.auto.tfvars.json
+            generated/request_metadata.json
+            generated/execution_log.json
+
+  terraform_plan:
+    name: Stage 3 Terraform Plan
+    runs-on: ubuntu-latest
+    needs:
+      - validate_request
+    outputs:
+      tf_plan_status: ${{ steps.plan_status.outputs.tf_plan_status }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-cluster-adgroup-generated
+          path: generated
+
+      - name: Validate Azure auth secrets
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          set -euo pipefail
+          [ -n "$AZURE_CLIENT_ID" ] || { echo "ERROR: Missing secret AZURE_CLIENT_ID"; exit 1; }
+          [ -n "$AZURE_CLIENT_SECRET" ] || { echo "ERROR: Missing secret AZURE_CLIENT_SECRET"; exit 1; }
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || { echo "ERROR: Missing secret AZURE_SUBSCRIPTION_ID"; exit 1; }
+          [ -n "$AZURE_TENANT_ID" ] || { echo "ERROR: Missing secret AZURE_TENANT_ID"; exit 1; }
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: >-
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
+
+      - name: Load Databricks and Terraform backend secrets from Azure Key Vault
+        env:
+          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYVAULT_NAME" ]; then
+            echo "ERROR: KEYVAULT_NAME secret is missing."
+            exit 1
+          fi
+
+          get_kv_secret() {
+            local logical_name="$1"
+            shift
+            local candidate value
+            for candidate in "$@"; do
+              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
+                if [ -n "$value" ]; then
+                  echo "$value"
+                  return 0
+                fi
+              fi
+            done
+            echo "ERROR: Secret not found for $logical_name. Tried: $*" >&2
+            return 1
+          }
+
+          try_kv_secret() {
+            local candidate value
+            for candidate in "$@"; do
+              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
+                if [ -n "$value" ]; then
+                  echo "$value"
+                  return 0
+                fi
+              fi
+            done
+            return 1
+          }
+
+          DBX_HOST=$(get_kv_secret "Databricks host" DATABRICKS-HOST DATABRICKS_HOST)
+          DBX_CLIENT_ID=$(try_kv_secret DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID || true)
+          DBX_CLIENT_SECRET=$(try_kv_secret DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET || true)
+          DBX_TENANT_ID=$(try_kv_secret DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID || true)
+          DBX_WORKSPACE_RESOURCE_ID=$(try_kv_secret DATABRICKS-WORKSPACE-RESOURCE-ID DATABRICKS_WORKSPACE_RESOURCE_ID || true)
+
+          DBX_CLIENT_ID="${DBX_CLIENT_ID:-$AZURE_CLIENT_ID}"
+          DBX_CLIENT_SECRET="${DBX_CLIENT_SECRET:-$AZURE_CLIENT_SECRET}"
+          DBX_TENANT_ID="${DBX_TENANT_ID:-$AZURE_TENANT_ID}"
+
+          [ -n "$DBX_CLIENT_ID" ] || { echo "ERROR: Databricks client id not found in KV and AZURE_CLIENT_ID is empty."; exit 1; }
+          [ -n "$DBX_CLIENT_SECRET" ] || { echo "ERROR: Databricks client secret not found in KV and AZURE_CLIENT_SECRET is empty."; exit 1; }
+          [ -n "$DBX_TENANT_ID" ] || { echo "ERROR: Databricks tenant id not found in KV and AZURE_TENANT_ID is empty."; exit 1; }
+          [ -n "$DBX_WORKSPACE_RESOURCE_ID" ] || { echo "ERROR: DATABRICKS-WORKSPACE-RESOURCE-ID is required for Azure SP auth."; exit 1; }
+
+          echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_workspace_resource_id=$DBX_WORKSPACE_RESOURCE_ID" >> "$GITHUB_ENV"
+
+          TFSTATE_RG=$(get_kv_secret "TF state resource group" TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)
+          TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
+          TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA)
+          TFSTATE_KEY=$(get_kv_secret "TF state key" TFSTATE-KEY-DBX)
+          TFSTATE_ACCESS_KEY=$(try_kv_secret TFSTATE-ACCESS-KEY TFSTATE_ACCESS_KEY || true)
+
+          echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
+          echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
+          echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
+          echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
+          echo "TFSTATE_ACCESS_KEY=$TFSTATE_ACCESS_KEY" >> "$GITHUB_ENV"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: terraform
+        run: |
+          set -euo pipefail
+          if [ -n "${TFSTATE_ACCESS_KEY:-}" ]; then
+            terraform init \
+              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+              -backend-config="container_name=$TFSTATE_CONTAINER" \
+              -backend-config="key=$TFSTATE_KEY" \
+              -backend-config="access_key=$TFSTATE_ACCESS_KEY"
+          else
+            terraform init \
+              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+              -backend-config="container_name=$TFSTATE_CONTAINER" \
+              -backend-config="key=$TFSTATE_KEY" \
+              -backend-config="use_azuread_auth=true"
+          fi
+
+      - name: Terraform validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var-file="../generated/terraform.auto.tfvars.json" \
+            -out="tfplan.binary"
+          terraform show -no-color tfplan.binary > tfplan.txt
+
+      - name: Set plan status
+        id: plan_status
+        run: echo "tf_plan_status=success" >> "$GITHUB_OUTPUT"
+
+      - name: Upload terraform plan output
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-cluster-adgroup-terraform-plan
+          path: |
+            terraform/tfplan.binary
+            terraform/tfplan.txt
+
+  terraform_apply:
+    name: Stage 4 Terraform Apply
+    runs-on: ubuntu-latest
+    needs:
+      - validate_request
+      - terraform_plan
+    if: ${{ github.event_name == 'push' || github.event.inputs.auto_apply == 'true' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-cluster-adgroup-generated
+          path: generated
+
+      - name: Download terraform plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-cluster-adgroup-terraform-plan
+          path: terraform
+
+      - name: Validate Azure auth secrets
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          set -euo pipefail
+          [ -n "$AZURE_CLIENT_ID" ] || { echo "ERROR: Missing secret AZURE_CLIENT_ID"; exit 1; }
+          [ -n "$AZURE_CLIENT_SECRET" ] || { echo "ERROR: Missing secret AZURE_CLIENT_SECRET"; exit 1; }
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || { echo "ERROR: Missing secret AZURE_SUBSCRIPTION_ID"; exit 1; }
+          [ -n "$AZURE_TENANT_ID" ] || { echo "ERROR: Missing secret AZURE_TENANT_ID"; exit 1; }
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: >-
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
+
+      - name: Load Databricks and Terraform backend secrets from Azure Key Vault
+        env:
+          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYVAULT_NAME" ]; then
+            echo "ERROR: KEYVAULT_NAME secret is missing."
+            exit 1
+          fi
+
+          get_kv_secret() {
+            local logical_name="$1"
+            shift
+            local candidate value
+            for candidate in "$@"; do
+              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
+                if [ -n "$value" ]; then
+                  echo "$value"
+                  return 0
+                fi
+              fi
+            done
+            echo "ERROR: Secret not found for $logical_name. Tried: $*" >&2
+            return 1
+          }
+
+          try_kv_secret() {
+            local candidate value
+            for candidate in "$@"; do
+              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
+                if [ -n "$value" ]; then
+                  echo "$value"
+                  return 0
+                fi
+              fi
+            done
+            return 1
+          }
+
+          DBX_HOST=$(get_kv_secret "Databricks host" DATABRICKS-HOST DATABRICKS_HOST)
+          DBX_CLIENT_ID=$(try_kv_secret DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID || true)
+          DBX_CLIENT_SECRET=$(try_kv_secret DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET || true)
+          DBX_TENANT_ID=$(try_kv_secret DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID || true)
+          DBX_WORKSPACE_RESOURCE_ID=$(try_kv_secret DATABRICKS-WORKSPACE-RESOURCE-ID DATABRICKS_WORKSPACE_RESOURCE_ID || true)
+
+          DBX_CLIENT_ID="${DBX_CLIENT_ID:-$AZURE_CLIENT_ID}"
+          DBX_CLIENT_SECRET="${DBX_CLIENT_SECRET:-$AZURE_CLIENT_SECRET}"
+          DBX_TENANT_ID="${DBX_TENANT_ID:-$AZURE_TENANT_ID}"
+
+          [ -n "$DBX_CLIENT_ID" ] || { echo "ERROR: Databricks client id not found in KV and AZURE_CLIENT_ID is empty."; exit 1; }
+          [ -n "$DBX_CLIENT_SECRET" ] || { echo "ERROR: Databricks client secret not found in KV and AZURE_CLIENT_SECRET is empty."; exit 1; }
+          [ -n "$DBX_TENANT_ID" ] || { echo "ERROR: Databricks tenant id not found in KV and AZURE_TENANT_ID is empty."; exit 1; }
+          [ -n "$DBX_WORKSPACE_RESOURCE_ID" ] || { echo "ERROR: DATABRICKS-WORKSPACE-RESOURCE-ID is required for Azure SP auth."; exit 1; }
+
+          echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_workspace_resource_id=$DBX_WORKSPACE_RESOURCE_ID" >> "$GITHUB_ENV"
+
+          TFSTATE_RG=$(get_kv_secret "TF state resource group" TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)
+          TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
+          TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA)
+          TFSTATE_KEY=$(get_kv_secret "TF state key" TFSTATE-KEY-DBX)
+          TFSTATE_ACCESS_KEY=$(try_kv_secret TFSTATE-ACCESS-KEY TFSTATE_ACCESS_KEY || true)
+
+          echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
+          echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
+          echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
+          echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
+          echo "TFSTATE_ACCESS_KEY=$TFSTATE_ACCESS_KEY" >> "$GITHUB_ENV"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: terraform
+        run: |
+          set -euo pipefail
+          if [ -n "${TFSTATE_ACCESS_KEY:-}" ]; then
+            terraform init \
+              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+              -backend-config="container_name=$TFSTATE_CONTAINER" \
+              -backend-config="key=$TFSTATE_KEY" \
+              -backend-config="access_key=$TFSTATE_ACCESS_KEY"
+          else
+            terraform init \
+              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+              -backend-config="container_name=$TFSTATE_CONTAINER" \
+              -backend-config="key=$TFSTATE_KEY" \
+              -backend-config="use_azuread_auth=true"
+          fi
+
+      - name: Terraform apply
+        working-directory: terraform
+        run: terraform apply -auto-approve tfplan.binary
+
+  notification:
+    name: Stage 5 Notification and Summary
+    runs-on: ubuntu-latest
+    needs:
+      - validate_request
+      - terraform_plan
+      - terraform_apply
+    if: always()
+    steps:
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-cluster-adgroup-generated
+          path: generated
+
+      - name: Publish workflow summary
+        run: |
+          {
+            echo "## Databricks Cluster AD Group Execution Summary"
+            echo ""
+            echo "- Request ID: ${{ needs.validate_request.outputs.request_id }}"
+            echo "- Environment: ${{ needs.validate_request.outputs.environment }}"
+            echo "- Activity Type: ${{ needs.validate_request.outputs.activity_type }}"
+            echo "- Cluster Name: ${{ needs.validate_request.outputs.cluster_name }}"
+            echo "- Cluster ID: ${{ needs.validate_request.outputs.cluster_id }}"
+            echo "- AD Group Name: ${{ needs.validate_request.outputs.ad_group_name }}"
+            echo "- Permission Level: ${{ needs.validate_request.outputs.cluster_permission_level }}"
+            echo "- Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}"
+            echo "- Apply Executed: ${{ github.event_name == 'push' || github.event.inputs.auto_apply == 'true' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive execution log
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-cluster-adgroup-execution-log
+          path: generated/execution_log.json

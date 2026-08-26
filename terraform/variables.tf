@@ -38,6 +38,19 @@ variable "service_account_cluster_access_records" {
   default = []
 }
 
+variable "cluster_ad_group_access_records" {
+  description = "Cluster AD group access actions parsed from the request artifact"
+  type = list(object({
+    row_id           = string
+    activity         = string
+    ad_group_name    = string
+    cluster_name     = string
+    cluster_id       = string
+    permission_level = string
+  }))
+  default = []
+}
+
 variable "databricks_host" {
   description = "Databricks workspace host"
   type        = string

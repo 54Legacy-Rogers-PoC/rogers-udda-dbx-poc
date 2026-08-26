@@ -41,6 +41,22 @@ locals {
     for key, r in local.service_account_cluster_access_records : key => r
     if r.activity == "REMOVE_FROM_CLUSTER"
   }
+
+  cluster_ad_group_access_records = {
+    for r in var.cluster_ad_group_access_records : r.row_id => merge(r, {
+      activity = upper(r.activity)
+    })
+  }
+
+  cluster_ad_group_add_records = {
+    for key, r in local.cluster_ad_group_access_records : key => r
+    if r.activity == "ADD"
+  }
+
+  cluster_ad_group_remove_records = {
+    for key, r in local.cluster_ad_group_access_records : key => r
+    if r.activity == "REMOVE"
+  }
 }
 
 resource "databricks_grant" "catalog_access" {
@@ -98,5 +114,27 @@ resource "databricks_permissions" "service_account_cluster_remove" {
   access_control {
     service_principal_name = each.value.service_account_name
     permission_level       = "CAN_ATTACH_TO"
+  }
+}
+
+resource "databricks_permissions" "cluster_ad_group_add" {
+  for_each = local.cluster_ad_group_add_records
+
+  cluster_id = each.value.cluster_id
+
+  access_control {
+    group_name       = each.value.ad_group_name
+    permission_level = each.value.permission_level
+  }
+}
+
+resource "databricks_permissions" "cluster_ad_group_remove" {
+  for_each = local.cluster_ad_group_remove_records
+
+  cluster_id = each.value.cluster_id
+
+  access_control {
+    group_name       = each.value.ad_group_name
+    permission_level = "CAN_ATTACH_TO"
   }
 }
