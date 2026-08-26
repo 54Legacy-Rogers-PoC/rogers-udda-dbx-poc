@@ -53,7 +53,7 @@ def main() -> int:
     args = parse_args()
     try:
         payload = _load_payload()
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"Unable to load input file {INPUT_FILE_NAME}: {exc}", file=sys.stderr)
         return 2
 
