@@ -37,8 +37,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: uda-dbx-object-access-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: uda-dbx-object-access-global
+  cancel-in-progress: false
 
 jobs:
   detect-templates:
@@ -76,7 +76,6 @@ jobs:
       TEMPLATE_FILE: ${{ matrix.template_file }}
       OUTPUT_ROOT: uda/output/object-access
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      TF_PLUGIN_CACHE_DIR: /home/runner/.terraform.d/plugin-cache
 
     steps:
       - name: Checkout repository
@@ -98,25 +97,11 @@ jobs:
         run: |
           KV="${{ secrets.KEYVAULT_NAME }}"
 
-          get_kv_secret_value() {
-            local secret_name="$1"
-            local value=""
-            for attempt in 1 2 3; do
-              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
-              if [ -n "$value" ]; then
-                printf '%s' "$value"
-                return 0
-              fi
-              sleep $((attempt * 2))
-            done
-            return 1
-          }
-
           get_kv_secret() {
             local out_var="$1"
             local secret_name="$2"
             local value
-            value="$(get_kv_secret_value "$secret_name" || true)"
+            value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
             if [ -z "$value" ]; then
               echo "Missing Key Vault secret: $secret_name" >&2
               exit 1
@@ -130,7 +115,7 @@ jobs:
             local names=("$@")
             local value=""
             for secret_name in "${names[@]}"; do
-              value="$(get_kv_secret_value "$secret_name" || true)"
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
               if [ -n "$value" ]; then
                 printf -v "$out_var" '%s' "$value"
                 return 0
@@ -190,19 +175,6 @@ jobs:
         with:
           terraform_version: 1.9.8
           terraform_wrapper: false
-
-      - name: Restore Terraform plugin cache
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
-        with:
-          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
-          key: ${{ runner.os }}-terraform-plugin-${{ hashFiles('terraform/.terraform.lock.hcl') }}
-          restore-keys: |
-            ${{ runner.os }}-terraform-plugin-
-
-      - name: Prepare Terraform plugin cache dir
-        shell: bash
-        run: |
-          mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
       - name: Install workflow dependencies
         run: |
@@ -437,7 +409,6 @@ jobs:
     env:
       TEMPLATE_FILE: ${{ matrix.template_file }}
       OUTPUT_ROOT: uda/output/object-access
-      TF_PLUGIN_CACHE_DIR: /home/runner/.terraform.d/plugin-cache
 
     steps:
       - name: Checkout repository
@@ -459,25 +430,11 @@ jobs:
         run: |
           KV="${{ secrets.KEYVAULT_NAME }}"
 
-          get_kv_secret_value() {
-            local secret_name="$1"
-            local value=""
-            for attempt in 1 2 3; do
-              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
-              if [ -n "$value" ]; then
-                printf '%s' "$value"
-                return 0
-              fi
-              sleep $((attempt * 2))
-            done
-            return 1
-          }
-
           get_kv_secret() {
             local out_var="$1"
             local secret_name="$2"
             local value
-            value="$(get_kv_secret_value "$secret_name" || true)"
+            value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
             if [ -z "$value" ]; then
               echo "Missing Key Vault secret: $secret_name" >&2
               exit 1
@@ -491,7 +448,7 @@ jobs:
             local names=("$@")
             local value=""
             for secret_name in "${names[@]}"; do
-              value="$(get_kv_secret_value "$secret_name" || true)"
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
               if [ -n "$value" ]; then
                 printf -v "$out_var" '%s' "$value"
                 return 0
@@ -544,19 +501,6 @@ jobs:
         with:
           terraform_version: 1.9.8
           terraform_wrapper: false
-
-      - name: Restore Terraform plugin cache
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
-        with:
-          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
-          key: ${{ runner.os }}-terraform-plugin-${{ hashFiles('terraform/.terraform.lock.hcl') }}
-          restore-keys: |
-            ${{ runner.os }}-terraform-plugin-
-
-      - name: Prepare Terraform plugin cache dir
-        shell: bash
-        run: |
-          mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
       - name: Prepare output paths
         id: prep_paths
