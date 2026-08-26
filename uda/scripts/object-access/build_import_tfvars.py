@@ -11,6 +11,10 @@ import json
 import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+ALLOWED_OUTPUT_ROOT = (REPO_ROOT / "uda" / "output" / "object-access").resolve()
+ALLOWED_INPUT_NAME = "object-access.auto.tfvars.json"
+
 
 def build_import_tfvars(src: Path, dst: Path) -> int:
     payload = json.loads(src.read_text(encoding="utf-8"))
@@ -36,12 +40,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def _resolve_input_json(path_input: str) -> Path:
-    src = Path(path_input)
-    if src.suffix.lower() != ".json":
-        raise ValueError(f"Input path must use .json extension: {path_input}")
+    src = Path(path_input).resolve()
+    if src.name != ALLOWED_INPUT_NAME:
+        raise ValueError(f"Input file must be named {ALLOWED_INPUT_NAME}: {path_input}")
+    if ALLOWED_OUTPUT_ROOT not in src.parents:
+        raise ValueError(f"Input path must be under {ALLOWED_OUTPUT_ROOT}")
     if not src.is_file():
         raise ValueError(f"Input file not found: {path_input}")
-    return src.resolve()
+    return src
 
 
 def _derived_output_path(src: Path) -> Path:
