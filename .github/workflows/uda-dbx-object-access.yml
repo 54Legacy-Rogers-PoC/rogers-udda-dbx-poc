@@ -176,7 +176,7 @@ jobs:
 
       - name: Install workflow dependencies
         run: |
-          pip install --only-binary=:all: -r uda/scripts/object-access/requirements-ci.txt
+          pip install --only-binary=:all: pyyaml==6.0.2 openpyxl==3.1.5 xlrd==2.0.1
 
       - name: Prepare output paths
         id: prep_paths
