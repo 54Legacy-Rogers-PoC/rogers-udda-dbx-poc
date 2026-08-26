@@ -94,7 +94,6 @@ jobs:
       - name: Load Databricks secrets from Key Vault
         shell: bash
         run: |
-          set -euo pipefail
           KV="${{ secrets.KEYVAULT_NAME }}"
 
           get_kv_secret() {
@@ -135,20 +134,21 @@ jobs:
           echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
           echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
 
-          {
-            echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE"
-            echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE"
-            echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE"
-            echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE"
-            echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE"
-            echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE"
-            echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE"
-            echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE"
-            echo "ARM_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE"
-            echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE"
-            echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE"
-            echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE"
-          } >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+
+          echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE" >> "$GITHUB_ENV"
+
+          echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+
+          echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -413,7 +413,6 @@ jobs:
       - name: Load Databricks secrets from Key Vault
         shell: bash
         run: |
-          set -euo pipefail
           KV="${{ secrets.KEYVAULT_NAME }}"
 
           get_kv_secret() {
@@ -454,20 +453,21 @@ jobs:
           echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
           echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
 
-          {
-            echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE"
-            echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE"
-            echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE"
-            echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE"
-            echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE"
-            echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE"
-            echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE"
-            echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE"
-            echo "ARM_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE"
-            echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE"
-            echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE"
-            echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE"
-          } >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+
+          echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE" >> "$GITHUB_ENV"
+
+          echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+
+          echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
 
       - name: Set up Terraform
         id: setup_terraform_apply

@@ -7,11 +7,8 @@ used by tfvars generation and Terraform provisioning stages.
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
-import os
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +18,16 @@ except ImportError as exc:  # pragma: no cover - runtime dependency
 	raise SystemExit("PyYAML is required. Install with: pip install pyyaml") from exc
 
 try:
-	from openpyxl import load_workbook
-	from openpyxl import Workbook
+	from template_common import (  # pylint: disable=import-error
+		header_key,
+		load_workbook_compat,
+		merge_context,
+		normalize,
+		normalize_environment,
+		read_workbook_context,
+	)
 except ImportError as exc:  # pragma: no cover - runtime dependency
-	raise SystemExit("openpyxl is required. Install with: pip install openpyxl") from exc
+	raise SystemExit("Shared helpers are missing. Ensure template_common.py is present.") from exc
 
 REQUIRED_COLUMNS = [
 	"Environment",
@@ -59,28 +62,6 @@ HEADER_ALIASES = {
 }
 
 
-def _normalize(value: Any) -> str:
-	if value is None:
-		return ""
-	return str(value).strip()
-
-
-def _header_key(value: str) -> str:
-	return " ".join(_normalize(value).replace("\n", " ").split()).lower()
-
-
-def _normalize_environment(value: str) -> str:
-	mapped = {
-		"PROD": "PRD",
-		"PRODUCTION": "PRD",
-		"PRD": "PRD",
-		"QA": "QA",
-		"DEV": "DEV",
-	}
-	upper = value.upper()
-	return mapped.get(upper, upper)
-
-
 def _normalize_activity(value: str) -> str:
 	mapped = {
 		"ADD": "ADD",
@@ -96,7 +77,7 @@ def _normalize_activity(value: str) -> str:
 
 
 def _is_blank(value: Any) -> bool:
-	return _normalize(value) == ""
+	return normalize(value) == ""
 
 
 def _default_privilege(object_type: str) -> str:
@@ -112,7 +93,7 @@ def _default_privilege(object_type: str) -> str:
 def _canonical_headers(raw_headers: list[str]) -> list[str]:
 	canonical_headers: list[str] = []
 	header_alias_keys: dict[str, set[str]] = {
-		canonical: {_header_key(alias) for alias in aliases}
+		canonical: {header_key(alias) for alias in aliases}
 		for canonical, aliases in HEADER_ALIASES.items()
 	}
 
@@ -122,7 +103,7 @@ def _canonical_headers(raw_headers: list[str]) -> list[str]:
 			continue
 
 		mapped = None
-		normalized_header = _header_key(header)
+		normalized_header = header_key(header)
 		for canonical, aliases in HEADER_ALIASES.items():
 			if normalized_header in header_alias_keys[canonical]:
 				mapped = canonical
@@ -143,189 +124,49 @@ def _read_request_context(request_file: Path | None) -> dict[str, str]:
 	if not isinstance(payload, dict):
 		return {}
 
-	access_for = _normalize(payload.get("access_for")).lower()
+	access_for = normalize(payload.get("access_for")).lower()
+	access_for = normalize(payload.get("access_for")).lower()
 	principal_name = ""
 	if access_for == "ad_group":
-		principal_name = _normalize(payload.get("ad_group_name"))
+		principal_name = normalize(payload.get("ad_group_name"))
 	elif access_for == "service_account":
-		principal_name = _normalize(payload.get("service_account_name"))
+		principal_name = normalize(payload.get("service_account_name"))
 
 	return {
-		"request_id": _normalize(payload.get("request_id")),
-		"environment": _normalize(payload.get("environment")).upper(),
+		"request_id": normalize(payload.get("request_id")),
+		"environment": normalize(payload.get("environment")).upper(),
 		"access_for": access_for,
-		"activity_type": _normalize(payload.get("activity_type")).upper(),
+		"activity_type": normalize(payload.get("activity_type")).upper(),
 		"principal_name": principal_name,
-		"justification": _normalize(payload.get("justification")),
+		"justification": normalize(payload.get("justification")),
 	}
-
-
-def _is_placeholder(value: str) -> bool:
-	v = value.strip().lower()
-	return v.startswith("<enter") or v in {"na", "n/a", "-"}
-
-
-def _find_requestor_entry_col(sheet: Any) -> int | None:
-	for row in sheet.iter_rows(min_row=1, max_row=30, values_only=True):
-		for idx, cell in enumerate([_normalize(v) for v in row]):
-			if "requestor entry info" in _header_key(cell):
-				return idx
-	return None
-
-
-def _value_right_of_label(sheet: Any, label_matchers: list[str], requestor_col: int | None = None, prefer_email: bool = False) -> str:
-	for row in sheet.iter_rows(values_only=True):
-		row_values = [_normalize(v) for v in row]
-		for idx, cell in enumerate(row_values):
-			cell_key = _header_key(cell)
-			if any(m in cell_key for m in label_matchers):
-				if requestor_col is not None and requestor_col < len(row_values):
-					entry_val = row_values[requestor_col]
-					if entry_val and not _is_placeholder(entry_val):
-						if not prefer_email or "@" in entry_val:
-							return entry_val
-				for nxt in row_values[idx + 1 :]:
-					if nxt and not _is_placeholder(nxt):
-						if prefer_email and "@" not in nxt:
-							continue
-						return nxt
-	return ""
-
-
-def _extract_sheet_context(sheet: Any, requestor_col: int) -> dict[str, str]:
-	return {
-		"environment": _value_right_of_label(sheet, ["environment"], requestor_col=requestor_col),
-		"activity_type": _value_right_of_label(sheet, ["request type", "activity"], requestor_col=requestor_col),
-		"ad_group_name": _value_right_of_label(
-			sheet,
-			["dtb ad group name", "ad group name"],
-			requestor_col=requestor_col,
-			prefer_email=True,
-		),
-		"service_account_name": _value_right_of_label(
-			sheet,
-			["service account name"],
-			requestor_col=requestor_col,
-			prefer_email=True,
-		),
-	}
-
-
-def _merge_context_values(current: dict[str, str], found: dict[str, str]) -> None:
-	for key, value in found.items():
-		if not current[key] and value:
-			current[key] = value
-
-
-def _has_complete_context(context_values: dict[str, str]) -> bool:
-	return bool(
-		context_values["environment"]
-		and context_values["activity_type"]
-		and (context_values["ad_group_name"] or context_values["service_account_name"])
-	)
 
 
 def _read_workbook_context(template_file: Path) -> dict[str, str]:
-	workbook, tmp_path = _load_workbook_compat(template_file)
-	try:
-		context_values = {
-			"environment": "",
-			"activity_type": "",
-			"ad_group_name": "",
-			"service_account_name": "",
-		}
-
-		for sheet in workbook.worksheets:
-			requestor_col = _find_requestor_entry_col(sheet)
-			if requestor_col is None:
-				continue
-			found = _extract_sheet_context(sheet, requestor_col)
-			_merge_context_values(context_values, found)
-
-			if _has_complete_context(context_values):
-				break
-
-		access_for = ""
-		principal_name = ""
-		if context_values["ad_group_name"]:
-			access_for = "ad_group"
-			principal_name = context_values["ad_group_name"]
-		elif context_values["service_account_name"]:
-			access_for = "service_account"
-			principal_name = context_values["service_account_name"]
-
-		return {
-			"environment": _normalize_environment(context_values["environment"]),
-			"access_for": access_for,
-			"activity_type": _normalize_activity(context_values["activity_type"]),
-			"principal_name": principal_name,
-		}
-	finally:
-		if tmp_path:
-			try:
-				os.unlink(tmp_path)
-			except OSError:
-				pass
-
-
-def _merge_context(primary: dict[str, str], fallback: dict[str, str]) -> dict[str, str]:
-	merged = dict(fallback)
-	for key, value in primary.items():
-		if _normalize(value):
-			merged[key] = value
-	return merged
-
-
-def _load_workbook_compat(template_file: Path) -> tuple[Any, str | None]:
-	# First try openpyxl regardless of file extension. This handles files whose
-	# extension is .xls but content is actually OOXML (.xlsx).
-	try:
-		return load_workbook(filename=template_file, data_only=True), None
-	except Exception as xlsx_exc:  # pylint: disable=broad-except
-		if template_file.suffix.lower() != ".xls":
-			raise ValueError(f"Template file unreadable as xlsx: {xlsx_exc}") from xlsx_exc
-
-	try:
-		xlrd = importlib.import_module("xlrd")
-	except ModuleNotFoundError as exc:
-		raise SystemExit("xlrd is required for .xls support. Install with: pip install xlrd")
-
-	try:
-		xls_book = xlrd.open_workbook(str(template_file))
-	except Exception as xls_exc:  # pylint: disable=broad-except
-		raise ValueError(f"Template file unreadable as xls: {xls_exc}") from xls_exc
-	xlsx_book = Workbook()
-	xlsx_book.remove(xlsx_book.active)
-
-	for sheet_name in xls_book.sheet_names():
-		xls_sheet = xls_book.sheet_by_name(sheet_name)
-		xlsx_sheet = xlsx_book.create_sheet(title=sheet_name[:31] or "Sheet")
-		for row_idx in range(xls_sheet.nrows):
-			for col_idx in range(xls_sheet.ncols):
-				xlsx_sheet.cell(row=row_idx + 1, column=col_idx + 1, value=xls_sheet.cell_value(row_idx, col_idx))
-
-	with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as handle:
-		tmp_path = handle.name
-
-	xlsx_book.save(tmp_path)
-	return load_workbook(filename=tmp_path, data_only=True), tmp_path
+	context = read_workbook_context(template_file, _normalize_activity, swallow_errors=False)
+	return {
+		"environment": context.get("environment", ""),
+		"access_for": context.get("access_for", ""),
+		"activity_type": context.get("activity_type", ""),
+		"principal_name": context.get("principal_name", ""),
+	}
 
 
 def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any]], list[str]]:
 	if not template_file.exists():
 		raise FileNotFoundError(f"Template file not found: {template_file}")
 
-	workbook, tmp_path = _load_workbook_compat(template_file)
+	workbook, tmp_path = load_workbook_compat(template_file)
 	try:
 		if sheet_name not in workbook.sheetnames:
 			raise ValueError(f"Worksheet not found: {sheet_name}")
 
 		sheet = workbook[sheet_name]
 		header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
-		raw_headers = [_normalize(v) for v in (header_cells or [])]
-		if _header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
+		raw_headers = [normalize(v) for v in (header_cells or [])]
+		if header_key(raw_headers[0] if raw_headers else "") == "information entered by requestor":
 			header_cells = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
-			raw_headers = [_normalize(v) for v in (header_cells or [])]
+			raw_headers = [normalize(v) for v in (header_cells or [])]
 			min_row = 3
 		else:
 			min_row = 2
@@ -355,21 +196,21 @@ def _load_rows(template_file: Path, sheet_name: str) -> tuple[list[dict[str, Any
 
 
 def _normalize_row(row: dict[str, Any], request_context: dict[str, str]) -> dict[str, Any]:
-	row_activity = _normalize(row.get("Activity")).upper()
-	row_environment = _normalize(row.get("Environment")).upper()
-	row_access_for = _normalize(row.get("Access_For")).lower()
-	row_principal = _normalize(row.get("Principal_Name"))
+	row_activity = normalize(row.get("Activity")).upper()
+	row_environment = normalize(row.get("Environment")).upper()
+	row_access_for = normalize(row.get("Access_For")).lower()
+	row_principal = normalize(row.get("Principal_Name"))
 
 	activity = _normalize_activity(row_activity or request_context.get("activity_type", ""))
-	environment = _normalize_environment(row_environment or request_context.get("environment", ""))
+	environment = normalize_environment(row_environment or request_context.get("environment", ""))
 	access_for = row_access_for or request_context.get("access_for", "")
 	principal_name = row_principal or request_context.get("principal_name", "")
-	catalog = _normalize(row.get("Catalog"))
-	schema = _normalize(row.get("Schema"))
-	object_name = _normalize(row.get("Object_Name"))
-	folder_path = _normalize(row.get("Folder_Path"))
+	catalog = normalize(row.get("Catalog"))
+	schema = normalize(row.get("Schema"))
+	object_name = normalize(row.get("Object_Name"))
+	folder_path = normalize(row.get("Folder_Path"))
 
-	object_type = _normalize(row.get("Object_Type")).upper()
+	object_type = normalize(row.get("Object_Type")).upper()
 	if object_type == "":
 		if folder_path != "":
 			object_type = "FOLDER"
@@ -380,9 +221,9 @@ def _normalize_row(row: dict[str, Any], request_context: dict[str, str]) -> dict
 		elif catalog != "":
 			object_type = "CATALOG"
 
-	privilege = _normalize(row.get("Privilege")).upper() or _default_privilege(object_type)
-	record_id = _normalize(row.get("Record_ID")) or f"ROW-{row['_row']:04d}"
-	justification = _normalize(row.get("Justification")) or request_context.get("justification", "")
+	privilege = normalize(row.get("Privilege")).upper() or _default_privilege(object_type)
+	record_id = normalize(row.get("Record_ID")) or f"ROW-{row['_row']:04d}"
+	justification = normalize(row.get("Justification")) or request_context.get("justification", "")
 
 	return {
 		"row_number": row["_row"],
@@ -398,7 +239,7 @@ def _normalize_row(row: dict[str, Any], request_context: dict[str, str]) -> dict
 		"folder_path": folder_path,
 		"privilege": privilege,
 		"justification": justification,
-		"additional_information": _normalize(row.get("Additional_Information")),
+		"additional_information": normalize(row.get("Additional_Information")),
 	}
 
 
@@ -409,7 +250,7 @@ def parse_template_file(
 ) -> dict[str, Any]:
 	request_context = _read_request_context(request_file)
 	workbook_context = _read_workbook_context(template_file)
-	request_context = _merge_context(request_context, workbook_context)
+	request_context = merge_context(request_context, workbook_context)
 	rows, headers = _load_rows(template_file=template_file, sheet_name=sheet_name)
 	records = [_normalize_row(row, request_context) for row in rows]
 	request_id = request_context.get("request_id", "") or template_file.stem
