@@ -157,10 +157,6 @@ jobs:
     env:
       TEMPLATE_FILE: ${{ matrix.template_file }}
       OUTPUT_ROOT: uda/output/object-access
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_ACCESS_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_access_key }}
       TF_VAR_databricks_host: ${{ needs.load-runtime-secrets.outputs.databricks_host }}
       TF_VAR_databricks_client_id: ${{ needs.load-runtime-secrets.outputs.databricks_client_id }}
@@ -177,17 +173,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: |
-            {
-              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
-              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
-            }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -266,6 +251,11 @@ jobs:
       - name: Terraform init (with retry)
         shell: bash
         run: |
+          if [ -z "${TF_BACKEND_ACCESS_KEY:-}" ]; then
+            echo "TF_BACKEND_ACCESS_KEY is empty; cannot initialize Terraform backend." >&2
+            exit 1
+          fi
+
           for attempt in 1 2 3; do
             echo "Terraform init attempt $attempt/3"
             if terraform -chdir=terraform init \
@@ -273,6 +263,7 @@ jobs:
               -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
               -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
               -backend-config="key=$TF_BACKEND_KEY" \
+              -backend-config="use_azuread_auth=false" \
               -backend-config="access_key=$TF_BACKEND_ACCESS_KEY"; then
               exit 0
             fi
@@ -427,10 +418,6 @@ jobs:
     env:
       TEMPLATE_FILE: ${{ matrix.template_file }}
       OUTPUT_ROOT: uda/output/object-access
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_ACCESS_KEY: ${{ needs.load-runtime-secrets.outputs.tf_backend_access_key }}
       TF_VAR_databricks_host: ${{ needs.load-runtime-secrets.outputs.databricks_host }}
       TF_VAR_databricks_client_id: ${{ needs.load-runtime-secrets.outputs.databricks_client_id }}
@@ -447,17 +434,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: |
-            {
-              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
-              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
-            }
 
       - name: Set up Terraform
         id: setup_terraform_apply
@@ -506,6 +482,11 @@ jobs:
       - name: Terraform init (with retry)
         shell: bash
         run: |
+          if [ -z "${TF_BACKEND_ACCESS_KEY:-}" ]; then
+            echo "TF_BACKEND_ACCESS_KEY is empty; cannot initialize Terraform backend." >&2
+            exit 1
+          fi
+
           for attempt in 1 2 3; do
             echo "Terraform init attempt $attempt/3"
             if terraform -chdir=terraform init \
@@ -513,6 +494,7 @@ jobs:
               -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
               -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
               -backend-config="key=$TF_BACKEND_KEY" \
+              -backend-config="use_azuread_auth=false" \
               -backend-config="access_key=$TF_BACKEND_ACCESS_KEY"; then
               exit 0
             fi
