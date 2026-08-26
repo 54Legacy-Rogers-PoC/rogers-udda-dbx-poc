@@ -10,6 +10,38 @@ from typing import Any, Callable
 
 from openpyxl import Workbook, load_workbook
 
+REQUIRED_COLUMNS = [
+    "Environment",
+    "Access_For",
+    "Principal_Name",
+    "Object_Type",
+    "Catalog",
+    "Schema",
+    "Object_Name",
+]
+
+COMPACT_REQUIRED_COLUMNS = ["Activity", "Catalog", "Schema", "Object_Name"]
+
+HEADER_ALIASES = {
+    "Record_ID": {"Record_ID", "record_id"},
+    "Activity": {"Activity", "activity"},
+    "Environment": {"Environment", "ENV", "Env", "environment"},
+    "Access_For": {"Access_For", "Access_for", "access_for"},
+    "Principal_Name": {"Principal_Name", "principal_name"},
+    "Object_Type": {"Object_Type", "object_type"},
+    "Catalog": {"Catalog", "catalog", "UC Catalog"},
+    "Schema": {
+        "Schema",
+        "schema",
+        "EDL Schema Name/Folder Name (vw_*) / Sandbox Name (vw_slfsrv_*) For non-EDL / <schema name>",
+    },
+    "Object_Name": {"Object_Name", "Object", "View", "view", "object_name", "Object Name"},
+    "Folder_Path": {"Folder_Path", "folder_path"},
+    "Privilege": {"Privilege", "privilege"},
+    "Justification": {"Justification", "justification"},
+    "Additional_Information": {"Additional_Information", "additional_information"},
+}
+
 
 def normalize(value: Any) -> str:
     if value is None:
