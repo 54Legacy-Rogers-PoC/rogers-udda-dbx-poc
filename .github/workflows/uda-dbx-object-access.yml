@@ -254,7 +254,7 @@ jobs:
     needs:
       - validate_request
       - terraform_plan
-    if: ${{ github.event_name == 'push' || github.event.inputs.auto_apply == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -431,7 +431,7 @@ jobs:
             echo "- Environment: ${{ needs.validate_request.outputs.environment }}"
             echo "- Number of Objects Processed: ${{ needs.validate_request.outputs.object_count }}"
             echo "- Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}"
-            echo "- Apply Executed: ${{ github.event_name == 'push' || github.event.inputs.auto_apply == 'true' }}"
+            echo "- Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Archive execution log

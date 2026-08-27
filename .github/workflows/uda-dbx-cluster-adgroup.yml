@@ -105,6 +105,7 @@ jobs:
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          tfstate_key_suffix: cluster-adgroup
 
       - name: Terraform validate
         working-directory: terraform
@@ -136,7 +137,7 @@ jobs:
     needs:
       - validate_request
       - terraform_plan
-    if: ${{ github.event_name == 'push' || github.event.inputs.auto_apply == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -161,6 +162,7 @@ jobs:
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          tfstate_key_suffix: cluster-adgroup
 
       - name: Terraform apply
         working-directory: terraform
@@ -194,7 +196,7 @@ jobs:
             echo "- AD Group Name: ${{ needs.validate_request.outputs.ad_group_name }}"
             echo "- Permission Level: ${{ needs.validate_request.outputs.cluster_permission_level }}"
             echo "- Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}"
-            echo "- Apply Executed: ${{ github.event_name == 'push' || github.event.inputs.auto_apply == 'true' }}"
+            echo "- Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Archive execution log

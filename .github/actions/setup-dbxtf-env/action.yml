@@ -17,6 +17,10 @@ inputs:
   keyvault_name:
     description: Azure Key Vault name
     required: true
+  tfstate_key_suffix:
+    description: Optional suffix appended to TFSTATE key to isolate workflow state
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -118,8 +122,19 @@ runs:
         TFSTATE_RG=$(get_kv_secret "TF state resource group" TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)
         TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
         TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA)
-        TFSTATE_KEY=$(get_kv_secret "TF state key" TFSTATE-KEY-DBX)
+        TFSTATE_KEY_BASE=$(get_kv_secret "TF state key" TFSTATE-KEY-DBX)
         TFSTATE_ACCESS_KEY=$(try_kv_secret TFSTATE-ACCESS-KEY TFSTATE_ACCESS_KEY || true)
+
+        TFSTATE_KEY_SUFFIX="${{ inputs.tfstate_key_suffix }}"
+        if [ -n "$TFSTATE_KEY_SUFFIX" ]; then
+          if [[ "$TFSTATE_KEY_BASE" == *.tfstate ]]; then
+            TFSTATE_KEY="${TFSTATE_KEY_BASE%.tfstate}-${TFSTATE_KEY_SUFFIX}.tfstate"
+          else
+            TFSTATE_KEY="${TFSTATE_KEY_BASE}-${TFSTATE_KEY_SUFFIX}"
+          fi
+        else
+          TFSTATE_KEY="$TFSTATE_KEY_BASE"
+        fi
 
         echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
         echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
