@@ -113,7 +113,7 @@ resource "databricks_permissions" "service_account_cluster_remove" {
 
   access_control {
     service_principal_name = each.value.service_account_name
-    permission_level       = "CAN_ATTACH_TO"
+    permission_level       = each.value.permission_level
   }
 }
 
@@ -135,6 +135,6 @@ resource "databricks_permissions" "cluster_ad_group_remove" {
 
   access_control {
     group_name       = each.value.ad_group_name
-    permission_level = "CAN_ATTACH_TO"
+    permission_level = each.value.permission_level
   }
 }

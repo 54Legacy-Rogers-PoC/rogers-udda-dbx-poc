@@ -8,6 +8,8 @@ service_account_name: SPN-GHA-DBX-MANOJ
 attached_to_ad_group: false
 service_account_owner: Data Platform Team
 cluster_name: FINANCE_ANALYTICS_DEV
+cluster_permission_level: CAN_ATTACH_TO
+# Allowed values: CAN_ATTACH_TO, CAN_RESTART, CAN_MANAGE
 subscription: Sub-Abeer-Rogers-NPE
 resource_group_name: rg-adb-dev-cace
 workspace_name: adb-cap-cac

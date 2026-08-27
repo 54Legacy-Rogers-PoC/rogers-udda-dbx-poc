@@ -97,127 +97,14 @@ jobs:
           name: uda-cluster-adgroup-generated
           path: generated
 
-      - name: Validate Azure auth secrets
-        env:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        run: |
-          set -euo pipefail
-          [ -n "$AZURE_CLIENT_ID" ] || { echo "ERROR: Missing secret AZURE_CLIENT_ID"; exit 1; }
-          [ -n "$AZURE_CLIENT_SECRET" ] || { echo "ERROR: Missing secret AZURE_CLIENT_SECRET"; exit 1; }
-          [ -n "$AZURE_SUBSCRIPTION_ID" ] || { echo "ERROR: Missing secret AZURE_SUBSCRIPTION_ID"; exit 1; }
-          [ -n "$AZURE_TENANT_ID" ] || { echo "ERROR: Missing secret AZURE_TENANT_ID"; exit 1; }
-
-      - name: Azure Login
-        uses: azure/login@v2
+      - name: Setup Azure + KeyVault + Terraform backend
+        uses: ./.github/actions/setup-dbxtf-env
         with:
-          creds: >-
-            {
-              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
-              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
-            }
-
-      - name: Load Databricks and Terraform backend secrets from Azure Key Vault
-        env:
-          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        run: |
-          set -euo pipefail
-          if [ -z "$KEYVAULT_NAME" ]; then
-            echo "ERROR: KEYVAULT_NAME secret is missing."
-            exit 1
-          fi
-
-          get_kv_secret() {
-            local logical_name="$1"
-            shift
-            local candidate value
-            for candidate in "$@"; do
-              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
-                if [ -n "$value" ]; then
-                  echo "$value"
-                  return 0
-                fi
-              fi
-            done
-            echo "ERROR: Secret not found for $logical_name. Tried: $*" >&2
-            return 1
-          }
-
-          try_kv_secret() {
-            local candidate value
-            for candidate in "$@"; do
-              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
-                if [ -n "$value" ]; then
-                  echo "$value"
-                  return 0
-                fi
-              fi
-            done
-            return 1
-          }
-
-          DBX_HOST=$(get_kv_secret "Databricks host" DATABRICKS-HOST DATABRICKS_HOST)
-          DBX_CLIENT_ID=$(try_kv_secret DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID || true)
-          DBX_CLIENT_SECRET=$(try_kv_secret DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET || true)
-          DBX_TENANT_ID=$(try_kv_secret DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID || true)
-          DBX_WORKSPACE_RESOURCE_ID=$(try_kv_secret DATABRICKS-WORKSPACE-RESOURCE-ID DATABRICKS_WORKSPACE_RESOURCE_ID || true)
-
-          DBX_CLIENT_ID="${DBX_CLIENT_ID:-$AZURE_CLIENT_ID}"
-          DBX_CLIENT_SECRET="${DBX_CLIENT_SECRET:-$AZURE_CLIENT_SECRET}"
-          DBX_TENANT_ID="${DBX_TENANT_ID:-$AZURE_TENANT_ID}"
-
-          [ -n "$DBX_CLIENT_ID" ] || { echo "ERROR: Databricks client id not found in KV and AZURE_CLIENT_ID is empty."; exit 1; }
-          [ -n "$DBX_CLIENT_SECRET" ] || { echo "ERROR: Databricks client secret not found in KV and AZURE_CLIENT_SECRET is empty."; exit 1; }
-          [ -n "$DBX_TENANT_ID" ] || { echo "ERROR: Databricks tenant id not found in KV and AZURE_TENANT_ID is empty."; exit 1; }
-          [ -n "$DBX_WORKSPACE_RESOURCE_ID" ] || { echo "ERROR: DATABRICKS-WORKSPACE-RESOURCE-ID is required for Azure SP auth."; exit 1; }
-
-          echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_workspace_resource_id=$DBX_WORKSPACE_RESOURCE_ID" >> "$GITHUB_ENV"
-
-          TFSTATE_RG=$(get_kv_secret "TF state resource group" TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)
-          TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
-          TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA)
-          TFSTATE_KEY=$(get_kv_secret "TF state key" TFSTATE-KEY-DBX)
-          TFSTATE_ACCESS_KEY=$(try_kv_secret TFSTATE-ACCESS-KEY TFSTATE_ACCESS_KEY || true)
-
-          echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
-          echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
-          echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
-          echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
-          echo "TFSTATE_ACCESS_KEY=$TFSTATE_ACCESS_KEY" >> "$GITHUB_ENV"
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform init
-        working-directory: terraform
-        run: |
-          set -euo pipefail
-          if [ -n "${TFSTATE_ACCESS_KEY:-}" ]; then
-            terraform init \
-              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
-              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
-              -backend-config="container_name=$TFSTATE_CONTAINER" \
-              -backend-config="key=$TFSTATE_KEY" \
-              -backend-config="access_key=$TFSTATE_ACCESS_KEY"
-          else
-            terraform init \
-              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
-              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
-              -backend-config="container_name=$TFSTATE_CONTAINER" \
-              -backend-config="key=$TFSTATE_KEY" \
-              -backend-config="use_azuread_auth=true"
-          fi
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
 
       - name: Terraform validate
         working-directory: terraform
@@ -266,127 +153,14 @@ jobs:
           name: uda-cluster-adgroup-terraform-plan
           path: terraform
 
-      - name: Validate Azure auth secrets
-        env:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        run: |
-          set -euo pipefail
-          [ -n "$AZURE_CLIENT_ID" ] || { echo "ERROR: Missing secret AZURE_CLIENT_ID"; exit 1; }
-          [ -n "$AZURE_CLIENT_SECRET" ] || { echo "ERROR: Missing secret AZURE_CLIENT_SECRET"; exit 1; }
-          [ -n "$AZURE_SUBSCRIPTION_ID" ] || { echo "ERROR: Missing secret AZURE_SUBSCRIPTION_ID"; exit 1; }
-          [ -n "$AZURE_TENANT_ID" ] || { echo "ERROR: Missing secret AZURE_TENANT_ID"; exit 1; }
-
-      - name: Azure Login
-        uses: azure/login@v2
+      - name: Setup Azure + KeyVault + Terraform backend
+        uses: ./.github/actions/setup-dbxtf-env
         with:
-          creds: >-
-            {
-              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
-              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
-            }
-
-      - name: Load Databricks and Terraform backend secrets from Azure Key Vault
-        env:
-          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        run: |
-          set -euo pipefail
-          if [ -z "$KEYVAULT_NAME" ]; then
-            echo "ERROR: KEYVAULT_NAME secret is missing."
-            exit 1
-          fi
-
-          get_kv_secret() {
-            local logical_name="$1"
-            shift
-            local candidate value
-            for candidate in "$@"; do
-              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
-                if [ -n "$value" ]; then
-                  echo "$value"
-                  return 0
-                fi
-              fi
-            done
-            echo "ERROR: Secret not found for $logical_name. Tried: $*" >&2
-            return 1
-          }
-
-          try_kv_secret() {
-            local candidate value
-            for candidate in "$@"; do
-              if value=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$candidate" --query value -o tsv 2>/dev/null); then
-                if [ -n "$value" ]; then
-                  echo "$value"
-                  return 0
-                fi
-              fi
-            done
-            return 1
-          }
-
-          DBX_HOST=$(get_kv_secret "Databricks host" DATABRICKS-HOST DATABRICKS_HOST)
-          DBX_CLIENT_ID=$(try_kv_secret DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID || true)
-          DBX_CLIENT_SECRET=$(try_kv_secret DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET || true)
-          DBX_TENANT_ID=$(try_kv_secret DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID || true)
-          DBX_WORKSPACE_RESOURCE_ID=$(try_kv_secret DATABRICKS-WORKSPACE-RESOURCE-ID DATABRICKS_WORKSPACE_RESOURCE_ID || true)
-
-          DBX_CLIENT_ID="${DBX_CLIENT_ID:-$AZURE_CLIENT_ID}"
-          DBX_CLIENT_SECRET="${DBX_CLIENT_SECRET:-$AZURE_CLIENT_SECRET}"
-          DBX_TENANT_ID="${DBX_TENANT_ID:-$AZURE_TENANT_ID}"
-
-          [ -n "$DBX_CLIENT_ID" ] || { echo "ERROR: Databricks client id not found in KV and AZURE_CLIENT_ID is empty."; exit 1; }
-          [ -n "$DBX_CLIENT_SECRET" ] || { echo "ERROR: Databricks client secret not found in KV and AZURE_CLIENT_SECRET is empty."; exit 1; }
-          [ -n "$DBX_TENANT_ID" ] || { echo "ERROR: Databricks tenant id not found in KV and AZURE_TENANT_ID is empty."; exit 1; }
-          [ -n "$DBX_WORKSPACE_RESOURCE_ID" ] || { echo "ERROR: DATABRICKS-WORKSPACE-RESOURCE-ID is required for Azure SP auth."; exit 1; }
-
-          echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_workspace_resource_id=$DBX_WORKSPACE_RESOURCE_ID" >> "$GITHUB_ENV"
-
-          TFSTATE_RG=$(get_kv_secret "TF state resource group" TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)
-          TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
-          TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA)
-          TFSTATE_KEY=$(get_kv_secret "TF state key" TFSTATE-KEY-DBX)
-          TFSTATE_ACCESS_KEY=$(try_kv_secret TFSTATE-ACCESS-KEY TFSTATE_ACCESS_KEY || true)
-
-          echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
-          echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
-          echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
-          echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
-          echo "TFSTATE_ACCESS_KEY=$TFSTATE_ACCESS_KEY" >> "$GITHUB_ENV"
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform init
-        working-directory: terraform
-        run: |
-          set -euo pipefail
-          if [ -n "${TFSTATE_ACCESS_KEY:-}" ]; then
-            terraform init \
-              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
-              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
-              -backend-config="container_name=$TFSTATE_CONTAINER" \
-              -backend-config="key=$TFSTATE_KEY" \
-              -backend-config="access_key=$TFSTATE_ACCESS_KEY"
-          else
-            terraform init \
-              -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
-              -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
-              -backend-config="container_name=$TFSTATE_CONTAINER" \
-              -backend-config="key=$TFSTATE_KEY" \
-              -backend-config="use_azuread_auth=true"
-          fi
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
 
       - name: Terraform apply
         working-directory: terraform

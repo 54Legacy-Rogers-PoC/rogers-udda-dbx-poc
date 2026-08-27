@@ -6,6 +6,7 @@ activity_type: ADD
 cluster_name: FINANCE_ANALYTICS_DEV
 cluster_id: 0821-161748-z2lj0o0q
 cluster_permission_level: CAN_ATTACH_TO
+# Allowed values: CAN_ATTACH_TO, CAN_RESTART, CAN_MANAGE
 subscription: Sub-Abeer-Rogers-NPE
 resource_group_name: rg-adb-dev-cace
 databricks_workspace_name: adb-cap-cac
