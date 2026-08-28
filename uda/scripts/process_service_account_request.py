@@ -50,6 +50,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def map_environment(raw_environment: str, config: dict[str, Any]) -> str:
+    # Translate user-facing environment names to deployment codes (for example, Development -> DEV).
     mapping = config.get("environment_mapping", {})
     if raw_environment in mapping:
         return mapping[raw_environment]
@@ -58,6 +59,7 @@ def map_environment(raw_environment: str, config: dict[str, Any]) -> str:
 
 
 def normalize_activity(raw_activity: str) -> str:
+    # Accept common separators/casing and normalize everything to canonical workflow tokens.
     token = raw_activity.strip().lower().replace("-", "_").replace(" ", "_")
     token = token.replace("/", "_")
 
@@ -124,6 +126,7 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
     ad_group_name = str(request.get("ad_group_name", "")).strip()
     cluster_name = str(request.get("cluster_name", "")).strip()
     cluster_id = str(request.get("cluster_id", "")).strip()
+    # Default cluster permission when omitted so request samples remain concise.
     cluster_permission_level = str(request.get("cluster_permission_level", "CAN_ATTACH_TO")).strip().upper()
 
     if activity_type == "CREATE":
@@ -176,6 +179,7 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
 
 
 def requires_terraform(activity_type: str) -> bool:
+    # Only cluster permission activities require Terraform updates.
     return activity_type in {"ADD_TO_CLUSTER", "REMOVE_FROM_CLUSTER"}
 
 
@@ -183,6 +187,7 @@ def build_cluster_access_records(context: RequestContext) -> list[dict[str, Any]
     if context.activity_type not in {"ADD_TO_CLUSTER", "REMOVE_FROM_CLUSTER"}:
         return []
 
+    # Prefer cluster_id for Databricks permissions resources, but keep legacy cluster_name fallback.
     resolved_cluster_id = context.cluster_id or context.cluster_name
 
     return [
@@ -263,6 +268,7 @@ def main() -> None:
     write_json(output_dir / "request_metadata.json", metadata)
 
     governance_payload = {
+        # Keep payload shape aligned with downstream CM stored procedure contract.
         "platform": "Databricks",
         "service_account_name": context.service_account_name,
         "service_account_type": context.service_account_type,

@@ -44,6 +44,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def map_environment(raw_environment: str, config: dict[str, Any]) -> str:
+    # Map request-facing environment labels (for example, Development) to internal codes (for example, DEV).
     mapping = config.get("environment_mapping", {})
     if raw_environment in mapping:
         return mapping[raw_environment]
@@ -82,6 +83,7 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
     for field in required:
         get_required(request, field)
 
+    # Default to least-privileged cluster access when permission is omitted.
     permission_level = str(request.get("cluster_permission_level", "CAN_ATTACH_TO")).strip().upper()
     allowed_permission_levels = {"CAN_ATTACH_TO", "CAN_RESTART", "CAN_MANAGE"}
     if permission_level not in allowed_permission_levels:
@@ -113,6 +115,7 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
 
 
 def build_cluster_ad_group_records(context: RequestContext) -> list[dict[str, Any]]:
+    # `cluster_id` is preferred for Terraform permissions; fall back to `cluster_name` for backward compatibility.
     resolved_cluster_id = context.cluster_id or context.cluster_name
     return [
         {
@@ -161,6 +164,7 @@ def main() -> None:
 
     cluster_records = build_cluster_ad_group_records(context)
 
+    # Keep unrelated record collections empty so shared Terraform only targets this DDD payload.
     terraform_vars = {
         "request_id": context.request_id,
         "environment": context.environment,

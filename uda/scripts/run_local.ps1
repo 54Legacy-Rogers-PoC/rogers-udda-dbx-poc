@@ -9,6 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Default sample request per supported request type.
 $defaultRequestByType = @{
     "object-access" = "uda/requests/object-access/dev/RITMDEV0001.yaml"
     "service-account" = "uda/requests/service-account/dev/RITMDEVSA0001.yaml"
@@ -45,6 +46,7 @@ if ($SkipTerraform) {
 }
 
 if ($RequestType -eq "service-account") {
+    # Skip Terraform for metadata-only service-account activities.
     $metadata = Get-Content -Path "generated/request_metadata.json" -Raw | ConvertFrom-Json
     if (-not $metadata.requires_terraform) {
         Write-Host "Service-account request is metadata-only. Terraform not required."

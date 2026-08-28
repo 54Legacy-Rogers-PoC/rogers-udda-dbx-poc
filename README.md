@@ -1,178 +1,70 @@
-# Rogers UDA Databricks Object Access POC
+# Rogers UDA Databricks Access POC
 
-This repository implements DDD-DBX-02: Databricks Object Access Management for the Unified Data Access (UDA) framework.
-It also includes a DDD-DBX-01 service-account request processing scaffold for governance metadata processing.
+This repository implements Request-as-Code workflows for Databricks access operations in UDA.
 
-Approved requests are converted into Request-as-Code artifacts and executed by GitHub Actions and Terraform against Databricks.
+## DDD Documentation
 
-## Solution Overview
+DDD-specific documentation is now maintained in each request folder:
 
-- Request metadata is stored in YAML under `uda/requests/object-access/`.
-- Object-level access rows are stored in an attached template under `uda/attachments/object-access/`.
-- A workflow validates request YAML and template structure.
-- A parser script translates valid rows into `terraform.auto.tfvars.json`.
-- Terraform validates, plans, and applies Databricks permissions.
-- Execution summary and logs are published as workflow artifacts.
+- DDD-DBX-01 Service Account Lifecycle: `uda/requests/service-account/README.md`
+- DDD-DBX-02 Object Access Management: `uda/requests/object-access/README.md`
+- DDD-DBX-04 Cluster AD Group Association: `uda/requests/cluster-adgroup/README.md`
 
 ## Repository Structure
 
 ```
+# High-level repository layout
 .github/
-	workflows/
-		uda-dbx-object-access.yml
-		uda-dbx-service-account.yml
+  actions/
+    setup-dbxtf-env/
+  workflows/
+    uda-dbx-object-access.yml
+    uda-dbx-service-account.yml
+    uda-dbx-cluster-adgroup.yml
 terraform/
-	providers.tf
-	variables.tf
-	main.tf
-	outputs.tf
 uda/
-	attachments/
-		object-access/
-	requests/
-		object-access/
-		service-account/
-	scripts/
-	config/
-	templates/
-	tests/
-	docs/
+  attachments/
+  config/
+  docs/
+  requests/
+    object-access/
+    service-account/
+    cluster-adgroup/
+  scripts/
+  templates/
+  tests/
 ```
 
-## Request-as-Code Example
+## Workflow Behavior
 
-Sample request: `uda/requests/object-access/dev/RITMDEV0001.yaml`
+- Workflows validate request artifacts and generate `generated/terraform.auto.tfvars.json`.
+- Terraform plan runs for valid requests.
+- Terraform apply runs only for `workflow_dispatch` with `auto_apply=true`.
+- Push-triggered runs are plan-only.
 
-Key fields:
+## Shared Secrets and Backend
 
-- `request_id`
-- `platform` (`databricks`)
-- `request_type` (`object_access`)
-- `environment` (`Production`, `QA/Test`, `Development`)
-- `activity_type` (`ADD` or `REMOVE`)
-- `access_for` (`ad_group` or `service_account`)
-- `ad_group_name` or `service_account_name`
-- `template_file`
+GitHub Actions expects repository secrets for Azure login:
 
-## Template Requirements
-
-Template columns are documented in `uda/templates/ObjectAccessTemplate.columns.md`.
-
-Supported object types:
-
-- `catalog`
-- `schema`
-- `view`
-- `folder`
-
-Supported activities:
-
-- `ADD`
-- `REMOVE`
-
-If the `Activity` column is blank on a row, request-level `activity_type` is used.
-
-## Environment Mapping
-
-Configured in `uda/config/environments.yaml`.
-
-- `Production -> PRD`
-- `QA/Test -> QA`
-- `Development -> DEV`
-
-## GitHub Actions Workflow
-
-Workflow file: `.github/workflows/uda-dbx-object-access.yml`
-
-`workflow_dispatch` inputs:
-
-- `request_file`: request YAML path
-- `auto_apply`: when true, runs terraform apply
-
-Stages:
-
-1. Repository checkout and artifact loading
-2. Request validation
-3. Template validation and parsing
-4. Terraform init/validate/plan
-5. Terraform apply (conditional + approval environment)
-6. Notification and logging summary
-
-## Service Account Workflow (DDD-DBX-01 Scaffold)
-
-Workflow file: `.github/workflows/uda-dbx-service-account.yml`
-
-Sample request: `uda/requests/service-account/dev/RITMDEVSA0001.yaml`
-
-Parser script: `uda/scripts/process_service_account_request.py`
-
-Supported activity types:
-
-- `create`
-- `delete`
-- `add_to_ad_group`
-- `remove_from_ad_group`
-- `add_to_cluster`
-- `remove_from_cluster`
-- `change_ownership`
-
-Current behavior:
-
-- Metadata-only activities are processed and governance payload artifacts are generated.
-- Cluster access add (`add_to_cluster`) runs Terraform plan/apply through `.github/workflows/uda-dbx-service-account.yml` when `requires_terraform` is true.
-- Cluster access remove (`remove_from_cluster`) also runs Terraform plan/apply through `.github/workflows/uda-dbx-service-account.yml` when `requires_terraform` is true.
-- CM writeback is executed after successful metadata-only processing, or after successful Terraform apply for cluster-access actions.
-
-## Azure Key Vault Secrets
-
-Azure login in GitHub Actions uses these repository secrets:
-
-- `AZURE_CLIENT_ID` (or `SPN-GHA-DBX-MANOJ-ID`)
+- `AZURE_CLIENT_ID`
 - `AZURE_CLIENT_SECRET`
 - `AZURE_SUBSCRIPTION_ID`
 - `AZURE_TENANT_ID`
 - `KEYVAULT_NAME`
 
-The workflow reads these secrets at runtime:
-
-- `DATABRICKS-HOST`
-- `DATABRICKS-CLIENT-ID`
-- `DATABRICKS-CLIENT-SECRET`
-- `DATABRICKS-TENANT-ID`
-- `DATABRICKS-WORKSPACE-RESOURCE-ID` (required)
-
-The workflow also reads backend state configuration:
-
-- `TFSTATE-RESOURCE-GROUP`
-- `TFSTATE-STORAGE-ACCOUNT`
-- `TFSTATE-CONTAINER-DBX-UDA`
-- `TFSTATE-KEY`
-- `TFSTATE-ACCESS-KEY` (optional fallback)
-
-Backend auth behavior:
-
-- If `TFSTATE-ACCESS-KEY` exists, Terraform backend uses `access_key` auth.
-- If `TFSTATE-ACCESS-KEY` is absent, Terraform backend uses Azure AD auth (`use_azuread_auth=true`) and requires blob data permissions on the state container/account.
-
-These values must be present in the key vault referenced by repository secret `KEYVAULT_NAME`.
+Key Vault must provide Databricks and Terraform backend secrets consumed by `.github/actions/setup-dbxtf-env/action.yml`.
 
 ## Local Execution
 
-Run from repository root:
-
 ```powershell
+# Run the local helper script from repository root
 ./uda/scripts/run_local.ps1
-```
-
-Or run only parser:
-
-```powershell
-python uda/scripts/process_request.py --request-file uda/requests/object-access/dev/RITMDEV0001.yaml --config-file uda/config/environments.yaml --output-dir generated
 ```
 
 ## Testing
 
 ```powershell
+# Install parser/test dependencies, then run all tests
 pip install -r uda/scripts/requirements.txt
 pytest uda/tests -q
 ```
@@ -183,17 +75,3 @@ pytest uda/tests -q
 - Minimum one approval is required.
 - Branch protection and merge controls are required.
 - Direct commits to `main` are prohibited.
-
-## Current Design Defaults
-
-- Duplicate records in a template fail the request.
-- Invalid rows fail the request.
-- Processing is fail-fast to preserve traceability.
-- `max_records` default is set to `1000` and can be changed in config.
-
-## Open Decisions to Confirm
-
-- Final max template row count.
-- Partial-processing behavior for large requests.
-- Mixed ADD/REMOVE behavior policy per template.
-- Expanded Databricks object types beyond current baseline.

@@ -25,6 +25,7 @@ def write_status(path: Path, status: dict) -> None:
 
 
 def require_env(name: str) -> str:
+    # Centralized required-env validation keeps error messages consistent across modes.
     value = os.getenv(name, "").strip()
     if not value:
         raise CMWritebackError(f"Missing required environment variable: {name}")
@@ -58,6 +59,7 @@ def invoke_with_snowflake(payload: dict) -> dict:
         role=role,
     )
 
+    # Stored procedure contract accepts one JSON payload argument.
     sql = f"CALL {database}.{schema}.{procedure}(PARSE_JSON(%s))"
 
     try:
@@ -77,6 +79,7 @@ def invoke_with_snowflake(payload: dict) -> dict:
 
 
 def invoke_mock(payload: dict) -> dict:
+    # Mock mode allows pipeline validation without external Snowflake connectivity.
     return {
         "cm_writeback_status": "SUCCESS",
         "mode": "mock",
@@ -101,6 +104,7 @@ def main() -> None:
 
     payload = load_payload(Path(args.payload_file))
 
+    # Dispatch by mode so workflow behavior is explicit and easy to test.
     if args.mode == "snowflake":
         status = invoke_with_snowflake(payload)
     else:

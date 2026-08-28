@@ -38,6 +38,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def normalize_field(name: str) -> str:
+    # Normalize column/header tokens once so CSV/XLSX variants map to the same keys.
     return name.strip().lower().replace(" ", "_")
 
 
@@ -68,6 +69,7 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
     if access_for not in {"ad_group", "service_account"}:
         raise ValidationError("access_for must be either ad_group or service_account")
 
+    # Resolve the principal field dynamically based on access_for.
     principal_name_field = "ad_group_name" if access_for == "ad_group" else "service_account_name"
     principal_name = request.get(principal_name_field)
     if not principal_name:
@@ -99,6 +101,7 @@ def read_xlsx_rows(path: Path, worksheet_name: str) -> list[dict[str, str]]:
         raise ValidationError(f"Worksheet '{worksheet_name}' not found in template")
 
     worksheet = workbook[worksheet_name]
+    # Materialize rows in read-only mode for predictable header + row parsing.
     rows = list(worksheet.iter_rows(values_only=True))
     if not rows:
         return []
@@ -131,6 +134,7 @@ def load_template_rows(template_path: Path, template_config: dict[str, Any]) -> 
 
     suffix = template_path.suffix.lower()
     if suffix == ".csv":
+        # Normalize CSV headers to match XLSX normalization behavior.
         csv_rows = read_csv_rows(template_path)
         return [{normalize_field(k): (v or "").strip() for k, v in row.items()} for row in csv_rows]
 
@@ -172,6 +176,7 @@ def validate_record(
     if row_activity not in template_config["allowed_activities"]:
         raise ValidationError(f"Row {row_number}: invalid activity '{row_activity}'")
 
+    # Parse and normalize privileges early so object-type checks use canonical values.
     privileges = parse_privileges(row.get("privileges", ""))
 
     if object_type == "folder":
@@ -217,6 +222,7 @@ def dedupe_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
 
     for record in records:
+        # Dedupe by semantic identity, not row_id, so repeated rows are rejected deterministically.
         duplicate_key = json.dumps(
             {
                 "activity": record["activity"],
