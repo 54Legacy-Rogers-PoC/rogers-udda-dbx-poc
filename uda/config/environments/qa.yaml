@@ -1,0 +1,9 @@
+﻿name: QA/Test
+code: QA
+keyvault:
+  name: <qa-keyvault-name>
+databricks:
+  host: ""
+terraform:
+  backend_key: addremove.tfstate
+

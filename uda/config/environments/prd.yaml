@@ -1,0 +1,9 @@
+﻿name: Production
+code: PRD
+keyvault:
+  name: <prd-keyvault-name>
+databricks:
+  host: ""
+terraform:
+  backend_key: addremove.tfstate
+
