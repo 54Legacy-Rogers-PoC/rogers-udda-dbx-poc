@@ -10,16 +10,16 @@ governance:
 sandbox:
   selection: "New Sandbox"
   schema_name: "slfsrv_finance_reporting"
-  owner_name: "john.doe@54legacy.com"
+  owner_name: "furqan54@54legacy.com"
 
 communitymart:
   create: true
   schema_name: "vw_finance_ops"
-  owner_name: "jane.smith@54legacy.com"
+  owner_name: "jhansi@54legacy.com"
 
 ad_group:
-  name: "AAD-DBX-FINANCE-OPS"
-  owner_name: "ad.owner@54legacy.com"
+  name: "abeer@54legacy.com"
+  owner_name: "jhansi@54legacy.com"
 
 justification: "Need sandbox and community mart view schema for finance analytics use case."
 additional_information: "Manager and data owner approvals attached in ticket."
