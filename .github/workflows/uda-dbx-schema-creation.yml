@@ -319,15 +319,15 @@ jobs:
         run: |
           terraform -chdir=terraform/schema_creation plan \
             -lock-timeout=10m \
-            -var-file="../$TFVARS_JSON" \
-            -out="../$TFPLAN_BIN"
+            -var-file="../../$TFVARS_JSON" \
+            -out="../../$TFPLAN_BIN"
 
-          terraform -chdir=terraform/schema_creation show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
+          terraform -chdir=terraform/schema_creation show -no-color "../../$TFPLAN_BIN" > "$TFPLAN_TXT"
 
       - name: Terraform apply
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         run: |
-          terraform -chdir=terraform/schema_creation apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+          terraform -chdir=terraform/schema_creation apply -lock-timeout=10m -auto-approve "../../$TFPLAN_BIN"
 
       - name: Publish plan outputs
         if: ${{ always() && steps.prep_paths.outcome == 'success' }}
