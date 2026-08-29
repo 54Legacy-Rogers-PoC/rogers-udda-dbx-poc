@@ -10,7 +10,7 @@ governance:
 sandbox:
   selection: "New Sandbox"
   schema_name: "slfsrv_finance_reporting"
-  owner_name: "furqan54@54legacy.com"
+  owner_name: "furqan@54legacy.com"
 
 communitymart:
   create: true
