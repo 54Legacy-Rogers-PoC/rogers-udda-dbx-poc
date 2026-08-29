@@ -15,6 +15,7 @@ except ImportError as exc:  # pragma: no cover - runtime dependency
     raise SystemExit("PyYAML is required. Install with: pip install pyyaml") from exc
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[2]
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -45,7 +46,7 @@ def _is_blank(value: Any) -> bool:
 
 
 def _is_valid_url(value: str) -> bool:
-    return value.startswith("http://") or value.startswith("https://")
+    return value.startswith(("http://", "https://"))
 
 
 def _require_non_blank(
@@ -58,9 +59,7 @@ def _require_non_blank(
         errors.append(ValidationError(code=code, field=field, message=f"Field is required: {field}"))
 
 
-def validate_request_payload(payload: dict[str, Any]) -> list[ValidationError]:
-    errors: list[ValidationError] = []
-
+def _validate_top_level(payload: dict[str, Any], errors: list[ValidationError]) -> None:
     _require_non_blank(errors, payload, "request_id")
     _require_non_blank(errors, payload, "platform")
     _require_non_blank(errors, payload, "request_type")
@@ -114,6 +113,8 @@ def validate_request_payload(payload: dict[str, Any]) -> list[ValidationError]:
             )
         )
 
+
+def _validate_governance(payload: dict[str, Any], errors: list[ValidationError]) -> None:
     governance = as_dict(payload, "governance")
     epdg_ticket_url = normalize(governance.get("epdg_ticket_url"))
     if epdg_ticket_url and not _is_valid_url(epdg_ticket_url):
@@ -125,6 +126,8 @@ def validate_request_payload(payload: dict[str, Any]) -> list[ValidationError]:
             )
         )
 
+
+def _validate_sandbox(payload: dict[str, Any], errors: list[ValidationError]) -> None:
     sandbox = as_dict(payload, "sandbox")
     sandbox_selection = normalize(sandbox.get("selection"))
     sandbox_schema_name = normalize(sandbox.get("schema_name"))
@@ -151,56 +154,64 @@ def validate_request_payload(payload: dict[str, Any]) -> list[ValidationError]:
             ValidationError(code="SCR-001", field="sandbox.owner_name", message="Field is required: sandbox.owner_name")
         )
 
-    if sandbox_selection == "New Sandbox":
-        if _is_blank(sandbox_schema_name):
-            errors.append(
-                ValidationError(
-                    code="SCR-001",
-                    field="sandbox.schema_name",
-                    message="Field is required for New Sandbox: sandbox.schema_name",
-                )
-            )
-        elif not re.fullmatch(r"slfsrv_[a-z0-9_]+", sandbox_schema_name):
-            errors.append(
-                ValidationError(
-                    code="SCR-008",
-                    field="sandbox.schema_name",
-                    message="sandbox.schema_name must match pattern: slfsrv_[a-z0-9_]+",
-                )
-            )
+    if sandbox_selection != "New Sandbox":
+        return
 
+    if _is_blank(sandbox_schema_name):
+        errors.append(
+            ValidationError(
+                code="SCR-001",
+                field="sandbox.schema_name",
+                message="Field is required for New Sandbox: sandbox.schema_name",
+            )
+        )
+    elif not re.fullmatch(r"slfsrv_[a-z0-9_]+", sandbox_schema_name):
+        errors.append(
+            ValidationError(
+                code="SCR-008",
+                field="sandbox.schema_name",
+                message="sandbox.schema_name must match pattern: slfsrv_[a-z0-9_]+",
+            )
+        )
+
+
+def _validate_communitymart(payload: dict[str, Any], errors: list[ValidationError]) -> None:
     communitymart = as_dict(payload, "communitymart")
     cm_create = to_bool(communitymart.get("create"))
     cm_schema_name = normalize(communitymart.get("schema_name"))
     cm_owner_name = normalize(communitymart.get("owner_name"))
 
-    if cm_create:
-        if _is_blank(cm_schema_name):
-            errors.append(
-                ValidationError(
-                    code="SCR-001",
-                    field="communitymart.schema_name",
-                    message="Field is required when communitymart.create is true: communitymart.schema_name",
-                )
-            )
-        elif not re.fullmatch(r"vw_[a-z0-9_]+", cm_schema_name):
-            errors.append(
-                ValidationError(
-                    code="SCR-009",
-                    field="communitymart.schema_name",
-                    message="communitymart.schema_name must match pattern: vw_[a-z0-9_]+",
-                )
-            )
+    if not cm_create:
+        return
 
-        if _is_blank(cm_owner_name):
-            errors.append(
-                ValidationError(
-                    code="SCR-001",
-                    field="communitymart.owner_name",
-                    message="Field is required when communitymart.create is true: communitymart.owner_name",
-                )
+    if _is_blank(cm_schema_name):
+        errors.append(
+            ValidationError(
+                code="SCR-001",
+                field="communitymart.schema_name",
+                message="Field is required when communitymart.create is true: communitymart.schema_name",
             )
+        )
+    elif not re.fullmatch(r"vw_[a-z0-9_]+", cm_schema_name):
+        errors.append(
+            ValidationError(
+                code="SCR-009",
+                field="communitymart.schema_name",
+                message="communitymart.schema_name must match pattern: vw_[a-z0-9_]+",
+            )
+        )
 
+    if _is_blank(cm_owner_name):
+        errors.append(
+            ValidationError(
+                code="SCR-001",
+                field="communitymart.owner_name",
+                message="Field is required when communitymart.create is true: communitymart.owner_name",
+            )
+        )
+
+
+def _validate_ad_group(payload: dict[str, Any], errors: list[ValidationError]) -> None:
     ad_group = as_dict(payload, "ad_group")
     ad_group_name = normalize(ad_group.get("name"))
     ad_group_owner_name = normalize(ad_group.get("owner_name"))
@@ -211,6 +222,26 @@ def validate_request_payload(payload: dict[str, Any]) -> list[ValidationError]:
         errors.append(
             ValidationError(code="SCR-001", field="ad_group.owner_name", message="Field is required: ad_group.owner_name")
         )
+
+
+def _resolve_request_file_path(raw_path: str) -> Path:
+    candidate = Path(raw_path).expanduser()
+    resolved = (Path.cwd() / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+    try:
+        resolved.relative_to(REPO_ROOT)
+    except ValueError as exc:
+        raise ValueError(f"request_file must be inside repository root: {REPO_ROOT}") from exc
+    return resolved
+
+
+def validate_request_payload(payload: dict[str, Any]) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+
+    _validate_top_level(payload, errors)
+    _validate_governance(payload, errors)
+    _validate_sandbox(payload, errors)
+    _validate_communitymart(payload, errors)
+    _validate_ad_group(payload, errors)
 
     return errors
 
@@ -257,7 +288,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    request_file = Path(args.request_file)
+    try:
+        request_file = _resolve_request_file_path(args.request_file)
+    except ValueError as exc:
+        print(f"Validation failed: {exc}", file=sys.stderr)
+        return 1
 
     errors = validate_request_file(request_file)
     if errors:

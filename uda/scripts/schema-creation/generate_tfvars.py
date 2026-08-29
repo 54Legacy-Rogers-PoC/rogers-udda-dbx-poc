@@ -88,10 +88,7 @@ def _validate_contract_with_terraform(tfvars_payload: dict[str, Any], variables_
     missing_relevant = [k for k in missing_keys if k not in ignored_missing]
 
     if missing_relevant:
-        details = []
-        if missing_relevant:
-            details.append(f"Terraform variables missing from generated tfvars: {missing_relevant}")
-        raise ValueError("; ".join(details))
+        raise ValueError(f"Terraform variables missing from generated tfvars: {missing_relevant}")
 
 
 def _prune_to_declared_vars(tfvars_payload: dict[str, Any], variables_file: Path) -> dict[str, Any]:
