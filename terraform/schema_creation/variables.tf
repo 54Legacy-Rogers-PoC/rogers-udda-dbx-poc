@@ -99,3 +99,33 @@ variable "ad_approval_required" {
   description = "Whether AD approval is required based on owner separation."
   type        = bool
 }
+
+variable "databricks_host" {
+  description = "Databricks workspace host URL."
+  type        = string
+  sensitive   = true
+}
+
+variable "databricks_client_id" {
+  description = "Databricks/Azure AD client ID for provider authentication."
+  type        = string
+  default     = null
+  nullable    = true
+  sensitive   = true
+}
+
+variable "databricks_client_secret" {
+  description = "Databricks/Azure AD client secret for provider authentication."
+  type        = string
+  default     = null
+  nullable    = true
+  sensitive   = true
+}
+
+variable "databricks_tenant_id" {
+  description = "Azure tenant ID used by Databricks provider authentication."
+  type        = string
+  default     = null
+  nullable    = true
+  sensitive   = true
+}

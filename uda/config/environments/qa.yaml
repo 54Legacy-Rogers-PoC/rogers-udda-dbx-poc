@@ -5,5 +5,6 @@ keyvault:
 databricks:
   host: ""
 terraform:
-  backend_key: addremove.tfstate
+  object_access_backend_key: addremove.tfstate
+  schema_creation_backend_key: schema-creation.tfstate
 
