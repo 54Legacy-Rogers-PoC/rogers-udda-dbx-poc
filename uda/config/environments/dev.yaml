@@ -1,0 +1,10 @@
+﻿name: Development
+code: DEV
+keyvault:
+  name: <dev-keyvault-name>
+databricks:
+  host: ""
+terraform:
+  object_access_backend_key: addremove.tfstate
+  schema_creation_backend_key: schema-creation.tfstate
+

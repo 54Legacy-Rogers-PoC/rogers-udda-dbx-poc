@@ -1,0 +1,18 @@
+version: 1
+
+# Human-entered values -> normalized environment codes used by scripts and Terraform.
+aliases:
+  production: PRD
+  prod: PRD
+  prd: PRD
+  development: DEV
+  dev: DEV
+  qa/test: QA
+  qa: QA
+  test: QA
+
+# Optional references for environment-specific config files.
+config_files:
+  DEV: uda/config/environments/dev.yaml
+  QA: uda/config/environments/qa.yaml
+  PRD: uda/config/environments/prd.yaml
