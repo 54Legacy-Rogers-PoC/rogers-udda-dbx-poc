@@ -32,6 +32,11 @@ on:
         required: true
         default: false
         type: boolean
+      allow_destroy:
+        description: Allow delete/replace actions in Terraform apply
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -210,7 +215,7 @@ jobs:
           get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT
           get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA
           get_kv_secret_fallback TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
-          TFSTATE_KEY_EFFECTIVE="schema-creation.tfstate"
+          TFSTATE_KEY_EFFECTIVE="schema-creation/default.tfstate"
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
@@ -236,7 +241,7 @@ jobs:
           echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
-          echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
+          echo "Using default backend key (will be overridden after normalization): $TFSTATE_KEY_EFFECTIVE"
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -282,6 +287,15 @@ jobs:
             --request-file "$REQUEST_FILE" \
             --output-json "$NORMALIZED_JSON"
 
+      - name: Compute backend key from normalized request
+        shell: bash
+        run: |
+          key_parts="$(python -c "import json,re,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); s=lambda v: re.sub(r'[^A-Za-z0-9._-]','-',str(v or '').strip()); print(f'{s((p.get(\"environment\") or \"\").upper())}/{s(p.get(\"request_id\"))}-{s(p.get(\"communitymart_schema_name\") or \"na\")}-{s(p.get(\"sandbox_schema_name\") or \"na\")}')")"
+
+          TFSTATE_KEY_EFFECTIVE="schema-creation/${key_parts}.tfstate"
+          echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
+          echo "Using computed backend key: $TFSTATE_KEY_EFFECTIVE"
+
       - name: Generate tfvars JSON
         run: |
           python uda/scripts/schema-creation/generate_tfvars.py \
@@ -323,6 +337,23 @@ jobs:
             -out="../../$TFPLAN_BIN"
 
           terraform -chdir=terraform/schema_creation show -no-color "../../$TFPLAN_BIN" > "$TFPLAN_TXT"
+
+      - name: Block destructive plan unless explicitly allowed
+        shell: bash
+        env:
+          ALLOW_DESTROY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_destroy || 'false' }}
+        run: |
+          PLAN_JSON="$OUTPUT_DIR/schema-creation-plan.json"
+          terraform -chdir=terraform/schema_creation show -json "../../$TFPLAN_BIN" > "$PLAN_JSON"
+
+          destroy_count="$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' "$PLAN_JSON")"
+          echo "Plan delete/replace action count: $destroy_count"
+
+          if [ "$destroy_count" -gt 0 ] && [ "${ALLOW_DESTROY,,}" != "true" ]; then
+            echo "Destructive Terraform actions detected (delete/replace)." >&2
+            echo "Set workflow_dispatch input allow_destroy=true to permit apply for this run." >&2
+            exit 1
+          fi
 
       - name: Terraform apply
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
