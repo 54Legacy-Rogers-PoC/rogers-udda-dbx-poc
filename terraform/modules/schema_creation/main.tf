@@ -6,12 +6,10 @@ locals {
   # Keep catalog defaults explicit until catalog selection is added to request payload.
   sandbox_catalog_name = "edlbi_ss"
   communitymart_catalog_name = "edl_communitymart"
+  communitymart_storage_base = "abfss://edl-community-mart@mazcacprdedlbidls01.dfs.core.windows.net/edl_community_mart"
 
   sandbox_schema_name = lower(trimspace(var.sandbox_schema_name))
   sandbox_owner_name = lower(trimspace(var.sandbox_owner_name))
-
-  ad_group_name = trimspace(var.ad_group_name)
-  ad_group_owner_name = lower(trimspace(var.ad_group_owner_name))
 
   create_communitymart_schema = var.create_communitymart_schema
   communitymart_schema_name = lower(trimspace(var.communitymart_schema_name))
@@ -91,25 +89,12 @@ resource "databricks_grant" "sandbox_owner" {
   ]
 }
 
-resource "databricks_grant" "sandbox_ad_group" {
-  count = local.sandbox_mode == "new" ? 1 : 0
-
-  depends_on = [
-    databricks_schema.sandbox,
-  ]
-
-  schema    = format("%s.%s", local.sandbox_catalog_name, local.sandbox_schema_name)
-  principal = local.ad_group_name
-  privileges = [
-    "USE_SCHEMA",
-  ]
-}
-
 resource "databricks_schema" "communitymart" {
   count = local.create_communitymart_schema ? 1 : 0
 
   catalog_name = local.communitymart_catalog_name
   name         = local.communitymart_schema_name
+  storage_root = format("%s/%s", local.communitymart_storage_base, local.communitymart_schema_name)
   comment      = format("Community mart schema created from request %s", local.request_id)
 }
 
@@ -124,19 +109,5 @@ resource "databricks_grant" "communitymart_owner" {
   principal = local.communitymart_owner_name
   privileges = [
     "ALL_PRIVILEGES",
-  ]
-}
-
-resource "databricks_grant" "communitymart_ad_group" {
-  count = local.create_communitymart_schema ? 1 : 0
-
-  depends_on = [
-    databricks_schema.communitymart,
-  ]
-
-  schema    = format("%s.%s", local.communitymart_catalog_name, local.communitymart_schema_name)
-  principal = local.ad_group_name
-  privileges = [
-    "USE_SCHEMA",
   ]
 }

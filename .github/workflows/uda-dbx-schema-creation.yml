@@ -95,14 +95,14 @@ jobs:
             if [ -n "${BASE_SHA_EVENT:-}" ] && [ -n "${HEAD_SHA_EVENT:-}" ]; then
               while IFS= read -r changed; do
                 add_request "$changed"
-              done < <(git diff --name-only "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" || true)
+              done < <(git diff --name-only --diff-filter=A "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" || true)
             fi
           fi
 
           if [ "${#REQUESTS[@]}" -eq 0 ]; then
             echo "has_requests=false" >> "$GITHUB_OUTPUT"
             echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
-            echo "No schema request files found."
+            echo "No newly added schema request files found."
             exit 0
           fi
 

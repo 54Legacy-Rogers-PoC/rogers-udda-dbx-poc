@@ -14,7 +14,6 @@ REQUIRED_KEYS = {
     "environment",
     "sandbox_mode",
     "sandbox_owner_name",
-    "ad_group_name",
     "assignment_group",
 }
 
@@ -25,8 +24,6 @@ DECLARED_TFVARS_KEYS = [
     "sandbox_mode",
     "sandbox_schema_name",
     "sandbox_owner_name",
-    "ad_group_name",
-    "ad_group_owner_name",
     "create_communitymart_schema",
     "communitymart_schema_name",
     "communitymart_owner_name",

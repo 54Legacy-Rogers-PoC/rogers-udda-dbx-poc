@@ -5,8 +5,6 @@ output "request_summary" {
     environment                  = local.environment
     sandbox_mode                 = local.sandbox_mode
     sandbox_owner_name           = local.sandbox_owner_name
-    ad_group_name                = local.ad_group_name
-    ad_group_owner_name          = local.ad_group_owner_name
     assignment_group             = local.assignment_group
     governance_approval_required = var.governance_approval_required
     ad_approval_required         = var.ad_approval_required

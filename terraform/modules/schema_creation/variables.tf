@@ -24,17 +24,6 @@ variable "sandbox_owner_name" {
   type        = string
 }
 
-variable "ad_group_name" {
-  description = "AAD group name to provision/associate."
-  type        = string
-}
-
-variable "ad_group_owner_name" {
-  description = "UPN/email of AAD group owner."
-  type        = string
-  default     = ""
-}
-
 variable "create_communitymart_schema" {
   description = "Whether to create a community mart schema."
   type        = bool
