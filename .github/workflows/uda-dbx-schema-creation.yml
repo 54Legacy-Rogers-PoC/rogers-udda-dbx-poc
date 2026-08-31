@@ -329,35 +329,7 @@ jobs:
           sandbox_container_suffix="$(SCHEMA="$sandbox_schema_name" python -c "import os; n=os.environ['SCHEMA']; p=[x for x in n.split('_') if x]; print('-'.join(p[1:-1]) if len(p)>2 else n.replace('_','-'))")"
           sandbox_container="sandbox-${sandbox_container_suffix}"
 
-          echo "Checking ADLS container: ${sandbox_container}"
-          set +e
-          exists="$(az storage container exists \
-            --account-name "$sandbox_storage_account" \
-            --name "$sandbox_container" \
-            --auth-mode login \
-            --query exists -o tsv 2>/tmp/sandbox_container_exists.err)"
-          exists_rc=$?
-          set -e
-
-          if [ "$exists_rc" -eq 0 ]; then
-            if [ "$exists" = "true" ]; then
-              echo "ADLS container already exists: ${sandbox_container}"
-              exit 0
-            fi
-
-            echo "Creating ADLS container via data-plane: ${sandbox_container}"
-            az storage container create \
-              --account-name "$sandbox_storage_account" \
-              --name "$sandbox_container" \
-              --auth-mode login \
-              --output none
-
-            echo "ADLS container created via data-plane: ${sandbox_container}"
-            exit 0
-          fi
-
-          echo "Data-plane check failed for ${sandbox_storage_account}/${sandbox_container}; falling back to ARM container ensure."
-          cat /tmp/sandbox_container_exists.err >&2 || true
+          echo "Ensuring ADLS container via ARM: ${sandbox_container}"
 
           storage_resource_group="$(az storage account show --name "$sandbox_storage_account" --query resourceGroup -o tsv)"
           if [ -z "$storage_resource_group" ]; then
