@@ -319,7 +319,7 @@ jobs:
           environment_code="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('environment') or '').strip().upper())")"
           case "$environment_code" in
             PRD)
-              sandbox_storage_account="mazcacprdedlbidls01"
+              sandbox_storage_account="stadbdev"
               ;;
             *)
               sandbox_storage_account="stadbdev"
