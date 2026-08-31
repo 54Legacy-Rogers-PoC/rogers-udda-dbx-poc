@@ -23,6 +23,7 @@ class RequestContext:
     activity_type: str
     access_for: str
     principal_name: str
+    requester_email: str
     template_file: str
     justification: str
     additional_information: str
@@ -83,6 +84,7 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
         activity_type=str(request["activity_type"]).strip().upper(),
         access_for=access_for,
         principal_name=str(principal_name).strip(),
+        requester_email=str(request.get("requester_email", "")).strip(),
         template_file=str(request["template_file"]).strip(),
         justification=str(request["justification"]).strip(),
         additional_information=str(request.get("additional_information", "")).strip(),
@@ -298,6 +300,16 @@ def main() -> None:
         validate_record(row=row, row_number=index + 2, context=context, template_config=template_config)
         for index, row in enumerate(rows)
     ]
+
+    # Enforce one request = one activity type so ADD and REMOVE are submitted separately.
+    mismatched_activities = sorted({record["activity"] for record in validated_records if record["activity"] != context.activity_type})
+    if mismatched_activities:
+        unexpected = ", ".join(mismatched_activities)
+        raise ValidationError(
+            f"Template contains activity values that do not match request activity_type '{context.activity_type}': {unexpected}. "
+            "Submit ADD and REMOVE in separate requests."
+        )
+
     validated_records = dedupe_records(validated_records)
 
     terraform_vars = {
@@ -311,6 +323,7 @@ def main() -> None:
 
     metadata = {
         "request_id": context.request_id,
+        "requester_email": context.requester_email,
         "environment": context.environment,
         "principal_type": context.access_for,
         "principal_name": context.principal_name,
@@ -322,6 +335,7 @@ def main() -> None:
 
     execution_log = {
         "request_id": context.request_id,
+        "requester_email": context.requester_email,
         "principal_type": context.access_for,
         "principal_name": context.principal_name,
         "environment": context.environment,

@@ -43,6 +43,7 @@ platform: databricks
 request_type: service_account
 environment: Production
 activity_type: create
+requester_email: service.requestor@example.com
 service_account_type: Business
 service_account_name: SERV_SALES_SLS_ORA_DTB_PRD
 service_account_owner: Data Platform Team
@@ -60,6 +61,7 @@ justification: Finance reporting automation
 
     metadata = json.loads((output_dir / "request_metadata.json").read_text(encoding="utf-8"))
     assert metadata["activity_type"] == "CREATE"
+    assert metadata["requester_email"] == "service.requestor@example.com"
     assert metadata["requires_terraform"] is False
     assert metadata["environment"] == "PRD"
 
@@ -134,7 +136,7 @@ justification: Revoke cluster execution rights
     assert tfvars["service_account_cluster_access_records"][0]["cluster_id"] == "0209-123456-abc123"
 
 
-def test_add_to_ad_group_requires_ad_group_name(tmp_path: Path):
+def test_add_to_ad_group_is_not_supported(tmp_path: Path):
     repo_root = tmp_path
     seed_repo_layout(repo_root)
 
@@ -155,4 +157,28 @@ justification: Align ownership and group mapping
     result = run_process_request(repo_root, request_path, repo_root / "uda" / "config" / "environments.yaml", output_dir)
 
     assert result.returncode != 0
-    assert "ad_group_name is required" in (result.stderr + result.stdout)
+    assert "Unsupported activity_type" in (result.stderr + result.stdout)
+
+
+def test_remove_from_ad_group_is_not_supported(tmp_path: Path):
+    repo_root = tmp_path
+    seed_repo_layout(repo_root)
+
+    request_yaml = """request_id: RITMSA1005
+platform: databricks
+request_type: service_account
+environment: QA/Test
+activity_type: remove_from_ad_group
+service_account_type: Business
+service_account_name: SERV_DATA_FINANCE_PBI_QA
+service_account_owner: Analytics Team
+justification: Decommission group mapping
+"""
+    request_path = repo_root / "uda" / "requests" / "service-account" / "RITMSA1005.yaml"
+    request_path.write_text(request_yaml, encoding="utf-8")
+
+    output_dir = repo_root / "generated"
+    result = run_process_request(repo_root, request_path, repo_root / "uda" / "config" / "environments.yaml", output_dir)
+
+    assert result.returncode != 0
+    assert "Unsupported activity_type" in (result.stderr + result.stdout)

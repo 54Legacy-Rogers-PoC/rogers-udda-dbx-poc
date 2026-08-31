@@ -1,4 +1,4 @@
-name: UDA Databricks Cluster AD Group
+name: DDD-DBX-04 UDA Databricks Cluster AD Group ADD
 
 on:
   workflow_dispatch:
@@ -6,22 +6,13 @@ on:
       request_file:
         description: Path to the Request-as-Code YAML
         required: true
-        default: uda/requests/cluster-adgroup/dev/RITMDEVAG0001.yaml
+        default: uda/requests/cluster-adgroup-add/dev/RITMDEVAG0001.yaml
         type: string
       auto_apply:
         description: Run terraform apply after successful plan
         required: true
         default: false
         type: boolean
-  push:
-    branches:
-      - main
-    paths:
-      - uda/requests/cluster-adgroup/**
-      - uda/scripts/process_cluster_adgroup_request.py
-      - uda/config/environments.yaml
-      - terraform/**
-      - .github/workflows/uda-dbx-cluster-adgroup.yml
 
 permissions:
   contents: read
@@ -32,7 +23,9 @@ jobs:
     name: Stage 1-2 Request Validation
     runs-on: ubuntu-latest
     outputs:
+      request_file: ${{ steps.request_input.outputs.request_file }}
       request_id: ${{ steps.read_metadata.outputs.request_id }}
+      requester_email: ${{ steps.read_metadata.outputs.requester_email }}
       environment: ${{ steps.read_metadata.outputs.environment }}
       activity_type: ${{ steps.read_metadata.outputs.activity_type }}
       cluster_name: ${{ steps.read_metadata.outputs.cluster_name }}
@@ -56,20 +49,33 @@ jobs:
       - name: Process cluster AD group request artifact
         run: |
           python uda/scripts/process_cluster_adgroup_request.py \
-            --request-file "${{ github.event.inputs.request_file || 'uda/requests/cluster-adgroup/dev/RITMDEVAG0001.yaml' }}" \
+            --request-file "${{ github.event.inputs.request_file || 'uda/requests/cluster-adgroup-add/dev/RITMDEVAG0001.yaml' }}" \
             --config-file "uda/config/environments.yaml" \
             --output-dir "generated"
+
+      - name: Resolve request file path
+        id: request_input
+        run: echo "request_file=${{ github.event.inputs.request_file || 'uda/requests/cluster-adgroup-add/dev/RITMDEVAG0001.yaml' }}" >> "$GITHUB_OUTPUT"
 
       - name: Read request metadata
         id: read_metadata
         run: |
           echo "request_id=$(jq -r .request_id generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "requester_email=$(jq -r '.requester_email // ""' generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "environment=$(jq -r .environment generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "activity_type=$(jq -r .activity_type generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "cluster_name=$(jq -r .cluster_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "ad_group_name=$(jq -r .ad_group_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "cluster_id=$(jq -r .cluster_id generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "cluster_permission_level=$(jq -r .cluster_permission_level generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce ADD activity for this workflow
+        run: |
+          ACTIVITY_TYPE=$(jq -r .activity_type generated/request_metadata.json)
+          if [ "$ACTIVITY_TYPE" != "ADD" ]; then
+            echo "ERROR: This workflow only supports activity_type=ADD. Use uda-dbx-cluster-adgroup-remove.yml for REMOVE requests."
+            exit 1
+          fi
 
       - name: Upload generated artifacts
         uses: actions/upload-artifact@v4
@@ -186,9 +192,11 @@ jobs:
       - name: Publish workflow summary
         run: |
           {
-            echo "## Databricks Cluster AD Group Execution Summary"
+            echo "## Databricks Cluster AD Group ADD Execution Summary"
             echo ""
+            echo "- Request File: ${{ needs.validate_request.outputs.request_file }}"
             echo "- Request ID: ${{ needs.validate_request.outputs.request_id }}"
+            echo "- Requester Email: ${{ needs.validate_request.outputs.requester_email || 'not_provided' }}"
             echo "- Environment: ${{ needs.validate_request.outputs.environment }}"
             echo "- Activity Type: ${{ needs.validate_request.outputs.activity_type }}"
             echo "- Cluster Name: ${{ needs.validate_request.outputs.cluster_name }}"
@@ -198,6 +206,51 @@ jobs:
             echo "- Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}"
             echo "- Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check notification configuration
+        id: notify_config
+        env:
+          NOTIFY_SMTP_SERVER: ${{ secrets.NOTIFY_SMTP_SERVER }}
+          NOTIFY_SMTP_PORT: ${{ secrets.NOTIFY_SMTP_PORT }}
+          NOTIFY_SMTP_USERNAME: ${{ secrets.NOTIFY_SMTP_USERNAME }}
+          NOTIFY_SMTP_PASSWORD: ${{ secrets.NOTIFY_SMTP_PASSWORD }}
+          NOTIFY_FROM_EMAIL: ${{ secrets.NOTIFY_FROM_EMAIL }}
+        run: |
+          if [ -n "$NOTIFY_SMTP_SERVER" ] && [ -n "$NOTIFY_SMTP_PORT" ] && [ -n "$NOTIFY_SMTP_USERNAME" ] && [ -n "$NOTIFY_SMTP_PASSWORD" ] && [ -n "$NOTIFY_FROM_EMAIL" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Send completion email to requester
+        if: needs.validate_request.outputs.requester_email != '' && steps.notify_config.outputs.ready == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.NOTIFY_SMTP_SERVER }}
+          server_port: ${{ secrets.NOTIFY_SMTP_PORT }}
+          username: ${{ secrets.NOTIFY_SMTP_USERNAME }}
+          password: ${{ secrets.NOTIFY_SMTP_PASSWORD }}
+          subject: "[UDA][DDD-DBX-04][ADD] Request ${{ needs.validate_request.outputs.request_id }} completed"
+          to: ${{ needs.validate_request.outputs.requester_email }}
+          from: ${{ secrets.NOTIFY_FROM_EMAIL }}
+          body: |
+            Your request has completed.
+
+            Request ID: ${{ needs.validate_request.outputs.request_id }}
+            Request File: ${{ needs.validate_request.outputs.request_file }}
+            Environment: ${{ needs.validate_request.outputs.environment }}
+            Activity: ${{ needs.validate_request.outputs.activity_type }}
+            Cluster: ${{ needs.validate_request.outputs.cluster_name }}
+            AD Group: ${{ needs.validate_request.outputs.ad_group_name }}
+            Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}
+            Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}
+
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Notification configuration status
+        if: needs.validate_request.outputs.requester_email == '' || steps.notify_config.outputs.ready != 'true'
+        run: |
+          echo "Requester email notification skipped. Ensure requester_email in request and SMTP secrets (NOTIFY_SMTP_SERVER, NOTIFY_SMTP_PORT, NOTIFY_SMTP_USERNAME, NOTIFY_SMTP_PASSWORD, NOTIFY_FROM_EMAIL)."
 
       - name: Archive execution log
         uses: actions/upload-artifact@v4

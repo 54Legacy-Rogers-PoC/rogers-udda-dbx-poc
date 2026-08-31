@@ -3,6 +3,7 @@ platform: databricks
 request_type: service_account
 environment: Development
 activity_type: create
+requester_email: data.requestor@rogers.com
 service_account_type: Business
 service_account_name: SPN-GHA-DBX-MANOJ
 attached_to_ad_group: false

@@ -14,6 +14,8 @@ This folder contains Request-as-Code YAML files for Databricks object-level acce
 - `ADD`
 - `REMOVE`
 
+Use separate requests for ADD and REMOVE. A single request cannot mix both activities.
+
 ## Supported Object Types
 - `catalog`
 - `schema`
@@ -26,6 +28,7 @@ This folder contains Request-as-Code YAML files for Databricks object-level acce
 - `request_type` (`object_access`)
 - `environment` (`Production`, `QA/Test`, `Development`)
 - `activity_type` (`ADD` or `REMOVE`)
+- `requester_email` (used for completion notification)
 - `access_for` (`ad_group` or `service_account`)
 - `ad_group_name` or `service_account_name`
 - `template_file`

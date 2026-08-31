@@ -3,6 +3,7 @@ platform: databricks
 request_type: object_access
 environment: Development
 activity_type: ADD
+requester_email: data.requestor@rogers.com
 access_for: ad_group
 ad_group_name: DTB_FINANCE_ANALYTICS_DEV
 template_file: ObjectAccessTemplate.csv

@@ -10,6 +10,8 @@ Approved ESMT requests are represented as YAML plus an attached object access te
 - AD group access
 - Service account access
 
+Policy: ADD and REMOVE must be submitted in separate requests.
+
 ## Supported Object Types
 - Unity Catalog catalogs
 - Unity Catalog schemas
@@ -36,5 +38,4 @@ Approved ESMT requests are represented as YAML plus an attached object access te
 ## Open Decisions
 - Maximum supported template row count per request.
 - Final behavior for partial failures in bulk requests.
-- Confirmation of mixed ADD and REMOVE rows in one template.
 - Final list of Databricks object types in scope.

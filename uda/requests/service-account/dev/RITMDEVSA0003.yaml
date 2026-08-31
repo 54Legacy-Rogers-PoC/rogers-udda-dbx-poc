@@ -3,6 +3,7 @@ platform: databricks
 request_type: service_account
 environment: Development
 activity_type: add_to_cluster
+requester_email: data.requestor@rogers.com
 service_account_type: Business
 service_account_name: 44fbe099-d19d-4d8c-8b4d-b056550ec6de
 service_account_owner: Data Platform Team

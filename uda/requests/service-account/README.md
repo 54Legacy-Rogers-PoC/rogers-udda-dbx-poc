@@ -11,11 +11,11 @@ This folder contains Request-as-Code YAML files for Databricks service account l
 ## Supported Activities
 - `create`
 - `delete`
-- `add_to_ad_group`
-- `remove_from_ad_group`
 - `add_to_cluster`
 - `remove_from_cluster`
 - `change_ownership`
+
+AD group to cluster access changes are handled in DDD-DBX-04 under `uda/requests/cluster-adgroup-add/` and `uda/requests/cluster-adgroup-remove/`.
 
 ## Terraform-Required Activities
 - `add_to_cluster`
@@ -38,6 +38,7 @@ Typical fields used by this DDD include:
 - `request_type` (`service_account`)
 - `environment` (`Production`, `QA/Test`, `Development`)
 - `activity_type`
+- `requester_email` (used for completion notification)
 - `service_account_name`
 - `service_account_owner`
 - `cluster_name` and `cluster_id` (for cluster activities)
