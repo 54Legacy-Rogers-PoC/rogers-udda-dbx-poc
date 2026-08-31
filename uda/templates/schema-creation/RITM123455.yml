@@ -1,0 +1,26 @@
+request_id: "RITM123455"
+platform: "Databricks"
+request_type: "Self Serve Request"
+
+environment: "Production"
+
+governance:
+  epdg_ticket_url: "https://jira.example.com/browse/EPDG-12345"
+
+sandbox:
+  selection: "New Sandbox"
+  schema_name: "slfsrv_furqan2_reporting"
+  owner_name: "furqan@54legacy.com"
+
+communitymart:
+  create: true
+  schema_name: "vw_furqan2_ops"
+  owner_name: "jhansi@54legacy.com"
+
+justification: "Need sandbox and community mart view schema for finance analytics use case."
+additional_information: "Manager and data owner approvals attached in ticket."
+assignment_group: "RSO-EDA CLOUD DEPLOYMENT"
+
+metadata:
+  submitted_by: "requestor@54legacy.com"
+  submitted_at_utc: "2026-08-28T10:30:00Z"

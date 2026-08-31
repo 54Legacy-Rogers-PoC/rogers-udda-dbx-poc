@@ -6,9 +6,14 @@ locals {
   # Keep catalog defaults explicit until catalog selection is added to request payload.
   sandbox_catalog_name = "edlbi_ss"
   communitymart_catalog_name = "edl_communitymart"
+  sandbox_storage_account_host = "stadbdev.dfs.core.windows.net"
   communitymart_storage_base = "abfss://edl-community-mart@stadbdev.dfs.core.windows.net/edl_community_mart"
 
   sandbox_schema_name = lower(trimspace(var.sandbox_schema_name))
+  sandbox_schema_parts = split("_", local.sandbox_schema_name)
+  sandbox_container_suffix = length(local.sandbox_schema_parts) > 2 ? join("-", slice(local.sandbox_schema_parts, 1, length(local.sandbox_schema_parts) - 1)) : replace(local.sandbox_schema_name, "_", "-")
+  sandbox_storage_container = format("sandbox-%s", local.sandbox_container_suffix)
+  sandbox_storage_root = format("abfss://%s@%s/%s", local.sandbox_storage_container, local.sandbox_storage_account_host, local.sandbox_schema_name)
   sandbox_owner_name = lower(trimspace(var.sandbox_owner_name))
 
   create_communitymart_schema = var.create_communitymart_schema
@@ -72,6 +77,7 @@ resource "databricks_schema" "sandbox" {
 
   catalog_name = local.sandbox_catalog_name
   name         = local.sandbox_schema_name
+  storage_root = local.sandbox_storage_root
   comment      = format("Schema created from request %s", local.request_id)
 
   lifecycle {
