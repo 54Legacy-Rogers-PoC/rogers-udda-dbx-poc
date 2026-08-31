@@ -398,6 +398,102 @@ jobs:
             exit 1
           fi
 
+      - name: Ensure sandbox external location exists before apply
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sandbox_mode="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('sandbox_mode') or '').strip().lower())")"
+          if [ "$sandbox_mode" != "new" ]; then
+            echo "Sandbox mode is not new; skipping external location ensure."
+            exit 0
+          fi
+
+          sandbox_schema_name="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('sandbox_schema_name') or '').strip().lower())")"
+          if [ -z "$sandbox_schema_name" ]; then
+            echo "sandbox_schema_name is required to derive sandbox external location." >&2
+            exit 1
+          fi
+
+          sandbox_storage_host="stadbdev.dfs.core.windows.net"
+          sandbox_container_suffix="$(SCHEMA="$sandbox_schema_name" python -c "import os; n=os.environ['SCHEMA']; p=[x for x in n.split('_') if x]; print('-'.join(p[1:-1]) if len(p)>2 else n.replace('_','-'))")"
+          sandbox_container="sandbox-${sandbox_container_suffix}"
+          sandbox_external_location_name="${sandbox_container}-location"
+          sandbox_external_location_url="abfss://${sandbox_container}@${sandbox_storage_host}/"
+
+          token_response="$(curl -sS -X POST "$DATABRICKS_HOST/oidc/v1/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=client_credentials" \
+            --data-urlencode "client_id=$DATABRICKS_CLIENT_ID" \
+            --data-urlencode "client_secret=$DATABRICKS_CLIENT_SECRET" \
+            --data-urlencode "scope=all-apis")"
+
+          dbx_token="$(echo "$token_response" | jq -r '.access_token // empty')"
+          if [ -z "$dbx_token" ]; then
+            echo "Failed to acquire Databricks OAuth token for external location ensure." >&2
+            echo "$token_response" >&2
+            exit 1
+          fi
+
+          lookup_status="$(curl -sS -o /tmp/sandbox_location.json -w '%{http_code}' \
+            -H "Authorization: Bearer $dbx_token" \
+            "$DATABRICKS_HOST/api/2.1/unity-catalog/external-locations/$sandbox_external_location_name")"
+
+          if [ "$lookup_status" -eq 200 ]; then
+            existing_url="$(jq -r '.url // empty' /tmp/sandbox_location.json)"
+            if [ "$existing_url" != "$sandbox_external_location_url" ]; then
+              echo "External location $sandbox_external_location_name exists but URL differs." >&2
+              echo "Existing: $existing_url" >&2
+              echo "Expected: $sandbox_external_location_url" >&2
+              exit 1
+            fi
+            echo "Reusing external location: $sandbox_external_location_name"
+            exit 0
+          fi
+
+          if [ "$lookup_status" -ne 404 ]; then
+            echo "Failed to query external location $sandbox_external_location_name (status: $lookup_status)." >&2
+            cat /tmp/sandbox_location.json >&2 || true
+            exit 1
+          fi
+
+          cm_lookup_status="$(curl -sS -o /tmp/cm_location.json -w '%{http_code}' \
+            -H "Authorization: Bearer $dbx_token" \
+            "$DATABRICKS_HOST/api/2.1/unity-catalog/external-locations/cm_location")"
+
+          if [ "$cm_lookup_status" -ge 400 ]; then
+            echo "Cannot read external location cm_location (status: $cm_lookup_status)." >&2
+            cat /tmp/cm_location.json >&2 || true
+            exit 1
+          fi
+
+          storage_credential_name="$(jq -r '.credential_name // empty' /tmp/cm_location.json)"
+          if [ -z "$storage_credential_name" ]; then
+            echo "Unable to determine storage credential from cm_location." >&2
+            exit 1
+          fi
+
+          payload="$(jq -cn \
+            --arg name "$sandbox_external_location_name" \
+            --arg url "$sandbox_external_location_url" \
+            --arg cred "$storage_credential_name" \
+            '{name:$name,url:$url,credential_name:$cred,read_only:false,comment:"Auto-created by UDA schema workflow"}')"
+
+          create_status="$(curl -sS -o /tmp/create_sandbox_location.json -w '%{http_code}' \
+            -X POST "$DATABRICKS_HOST/api/2.1/unity-catalog/external-locations" \
+            -H "Authorization: Bearer $dbx_token" \
+            -H "Content-Type: application/json" \
+            -d "$payload")"
+
+          if [ "$create_status" -ge 400 ]; then
+            echo "Failed to create external location $sandbox_external_location_name (status: $create_status)." >&2
+            cat /tmp/create_sandbox_location.json >&2 || true
+            exit 1
+          fi
+
+          echo "Created external location: $sandbox_external_location_name"
+
       - name: Terraform apply
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         run: |
