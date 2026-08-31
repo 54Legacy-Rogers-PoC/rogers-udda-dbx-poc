@@ -73,6 +73,11 @@ resource "databricks_schema" "sandbox" {
   catalog_name = local.sandbox_catalog_name
   name         = local.sandbox_schema_name
   comment      = format("Schema created from request %s", local.request_id)
+
+  lifecycle {
+    create_before_destroy = true
+    prevent_destroy       = true
+  }
 }
 
 resource "databricks_grant" "sandbox_owner" {
@@ -87,6 +92,11 @@ resource "databricks_grant" "sandbox_owner" {
   privileges = [
     "ALL_PRIVILEGES",
   ]
+
+  lifecycle {
+    create_before_destroy = true
+    prevent_destroy       = true
+  }
 }
 
 resource "databricks_schema" "communitymart" {
@@ -96,6 +106,11 @@ resource "databricks_schema" "communitymart" {
   name         = local.communitymart_schema_name
   storage_root = format("%s/%s", local.communitymart_storage_base, local.communitymart_schema_name)
   comment      = format("Community mart schema created from request %s", local.request_id)
+
+  lifecycle {
+    create_before_destroy = true
+    prevent_destroy       = true
+  }
 }
 
 resource "databricks_grant" "communitymart_owner" {
@@ -110,4 +125,9 @@ resource "databricks_grant" "communitymart_owner" {
   privileges = [
     "ALL_PRIVILEGES",
   ]
+
+  lifecycle {
+    create_before_destroy = true
+    prevent_destroy       = true
+  }
 }
