@@ -314,7 +314,16 @@ jobs:
             exit 1
           fi
 
-          sandbox_storage_account="stadbdev"
+          environment_code="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('environment') or '').strip().upper())")"
+          case "$environment_code" in
+            PRD)
+              sandbox_storage_account="mazcacprdedlbidls01"
+              ;;
+            *)
+              sandbox_storage_account="stadbdev"
+              ;;
+          esac
+
           sandbox_container_suffix="$(SCHEMA="$sandbox_schema_name" python -c "import os; n=os.environ['SCHEMA']; p=[x for x in n.split('_') if x]; print('-'.join(p[1:-1]) if len(p)>2 else n.replace('_','-'))")"
           sandbox_container="sandbox-${sandbox_container_suffix}"
 
@@ -416,11 +425,33 @@ jobs:
             exit 1
           fi
 
-          sandbox_storage_host="stadbdev.dfs.core.windows.net"
+          environment_code="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('environment') or '').strip().upper())")"
+          case "$environment_code" in
+            PRD)
+              environment_label="prod"
+              sandbox_storage_account="mazcacprdedlbidls01"
+              sandbox_storage_host="${sandbox_storage_account}.dfs.core.windows.net"
+              storage_credential_name="sc_unity_edl_ac_prd_wrtr"
+              ;;
+            QA)
+              environment_label="qa"
+              sandbox_storage_account="stadbdev"
+              sandbox_storage_host="${sandbox_storage_account}.dfs.core.windows.net"
+              storage_credential_name="adb-dev-cred"
+              ;;
+            *)
+              environment_label="dev"
+              sandbox_storage_account="stadbdev"
+              sandbox_storage_host="${sandbox_storage_account}.dfs.core.windows.net"
+              storage_credential_name="adb-dev-cred"
+              ;;
+          esac
+
           sandbox_container_suffix="$(SCHEMA="$sandbox_schema_name" python -c "import os; n=os.environ['SCHEMA']; p=[x for x in n.split('_') if x]; print('-'.join(p[1:-1]) if len(p)>2 else n.replace('_','-'))")"
           sandbox_container="sandbox-${sandbox_container_suffix}"
-          sandbox_external_location_name="${sandbox_container}-location"
+          sandbox_external_location_name="el_${environment_label}__${sandbox_container}__at__${sandbox_storage_account}__rw"
           sandbox_external_location_url="abfss://${sandbox_container}@${sandbox_storage_host}/"
+          sandbox_external_location_owner="furqan@54legacy.com"
 
           token_response="$(curl -sS -X POST "$DATABRICKS_HOST/oidc/v1/token" \
             -H "Content-Type: application/x-www-form-urlencoded" \
@@ -442,10 +473,17 @@ jobs:
 
           if [ "$lookup_status" -eq 200 ]; then
             existing_url="$(jq -r '.url // empty' /tmp/sandbox_location.json)"
+            existing_owner="$(jq -r '.owner // empty' /tmp/sandbox_location.json)"
             if [ "$existing_url" != "$sandbox_external_location_url" ]; then
               echo "External location $sandbox_external_location_name exists but URL differs." >&2
               echo "Existing: $existing_url" >&2
               echo "Expected: $sandbox_external_location_url" >&2
+              exit 1
+            fi
+            if [ -n "$existing_owner" ] && [ "$existing_owner" != "$sandbox_external_location_owner" ]; then
+              echo "External location owner differs from expected owner." >&2
+              echo "Existing owner: $existing_owner" >&2
+              echo "Expected owner: $sandbox_external_location_owner" >&2
               exit 1
             fi
             echo "Reusing external location: $sandbox_external_location_name"
@@ -458,27 +496,12 @@ jobs:
             exit 1
           fi
 
-          cm_lookup_status="$(curl -sS -o /tmp/cm_location.json -w '%{http_code}' \
-            -H "Authorization: Bearer $dbx_token" \
-            "$DATABRICKS_HOST/api/2.1/unity-catalog/external-locations/cm_location")"
-
-          if [ "$cm_lookup_status" -ge 400 ]; then
-            echo "Cannot read external location cm_location (status: $cm_lookup_status)." >&2
-            cat /tmp/cm_location.json >&2 || true
-            exit 1
-          fi
-
-          storage_credential_name="$(jq -r '.credential_name // empty' /tmp/cm_location.json)"
-          if [ -z "$storage_credential_name" ]; then
-            echo "Unable to determine storage credential from cm_location." >&2
-            exit 1
-          fi
-
           payload="$(jq -cn \
             --arg name "$sandbox_external_location_name" \
             --arg url "$sandbox_external_location_url" \
             --arg cred "$storage_credential_name" \
-            '{name:$name,url:$url,credential_name:$cred,read_only:false,comment:"Auto-created by UDA schema workflow"}')"
+            --arg owner "$sandbox_external_location_owner" \
+            '{name:$name,url:$url,credential_name:$cred,owner:$owner,read_only:false,comment:"Auto-created by UDA schema workflow"}')"
 
           create_status="$(curl -sS -o /tmp/create_sandbox_location.json -w '%{http_code}' \
             -X POST "$DATABRICKS_HOST/api/2.1/unity-catalog/external-locations" \
