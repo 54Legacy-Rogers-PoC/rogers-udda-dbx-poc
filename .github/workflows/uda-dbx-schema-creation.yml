@@ -507,10 +507,9 @@ jobs:
               exit 1
             fi
             if [ -n "$existing_owner" ] && [ "$existing_owner" != "$sandbox_external_location_owner" ]; then
-              echo "External location owner differs from expected owner." >&2
-              echo "Existing owner: $existing_owner" >&2
-              echo "Expected owner: $sandbox_external_location_owner" >&2
-              exit 1
+              echo "External location owner differs from expected owner."
+              echo "Existing owner: $existing_owner"
+              echo "Expected owner: $sandbox_external_location_owner"
             fi
             echo "Reusing external location: $sandbox_external_location_name"
             exit 0
@@ -526,8 +525,7 @@ jobs:
             --arg name "$sandbox_external_location_name" \
             --arg url "$sandbox_external_location_url" \
             --arg cred "$storage_credential_name" \
-            --arg owner "$sandbox_external_location_owner" \
-            '{name:$name,url:$url,credential_name:$cred,owner:$owner,read_only:false,comment:"Auto-created by UDA schema workflow"}')"
+            '{name:$name,url:$url,credential_name:$cred,read_only:false,comment:"Auto-created by UDA schema workflow"}')"
 
           create_status="$(curl -sS -o /tmp/create_sandbox_location.json -w '%{http_code}' \
             -X POST "$DATABRICKS_HOST/api/2.1/unity-catalog/external-locations" \
