@@ -211,19 +211,6 @@ def _validate_communitymart(payload: dict[str, Any], errors: list[ValidationErro
         )
 
 
-def _validate_ad_group(payload: dict[str, Any], errors: list[ValidationError]) -> None:
-    ad_group = as_dict(payload, "ad_group")
-    ad_group_name = normalize(ad_group.get("name"))
-    ad_group_owner_name = normalize(ad_group.get("owner_name"))
-
-    if _is_blank(ad_group_name):
-        errors.append(ValidationError(code="SCR-001", field="ad_group.name", message="Field is required: ad_group.name"))
-    if _is_blank(ad_group_owner_name):
-        errors.append(
-            ValidationError(code="SCR-001", field="ad_group.owner_name", message="Field is required: ad_group.owner_name")
-        )
-
-
 def _resolve_request_file_path(raw_path: str) -> Path:
     candidate = Path(raw_path).expanduser()
     resolved = (Path.cwd() / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
@@ -241,7 +228,6 @@ def validate_request_payload(payload: dict[str, Any]) -> list[ValidationError]:
     _validate_governance(payload, errors)
     _validate_sandbox(payload, errors)
     _validate_communitymart(payload, errors)
-    _validate_ad_group(payload, errors)
 
     return errors
 

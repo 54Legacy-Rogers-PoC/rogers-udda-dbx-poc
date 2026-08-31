@@ -47,7 +47,6 @@ def normalize_payload(payload: dict[str, Any], request_file: Path) -> dict[str, 
     governance = as_dict(payload, "governance")
     sandbox = as_dict(payload, "sandbox")
     communitymart = as_dict(payload, "communitymart")
-    ad_group = as_dict(payload, "ad_group")
     metadata = as_dict(payload, "metadata")
 
     environment_raw = normalize(payload.get("environment"))
@@ -59,7 +58,7 @@ def normalize_payload(payload: dict[str, Any], request_file: Path) -> dict[str, 
     create_communitymart_schema = to_bool(communitymart.get("create"))
 
     sandbox_owner = normalize_email(sandbox.get("owner_name"))
-    ad_group_owner = normalize_email(ad_group.get("owner_name"))
+    communitymart_owner = normalize_email(communitymart.get("owner_name"))
 
     epdg_ticket_url = normalize(governance.get("epdg_ticket_url"))
 
@@ -71,17 +70,20 @@ def normalize_payload(payload: dict[str, Any], request_file: Path) -> dict[str, 
         "sandbox_mode": sandbox_mode,
         "sandbox_schema_name": normalize(sandbox.get("schema_name")).lower(),
         "sandbox_owner_name": sandbox_owner,
-        "ad_group_name": normalize(ad_group.get("name")),
-        "ad_group_owner_name": ad_group_owner,
         "create_communitymart_schema": create_communitymart_schema,
         "communitymart_schema_name": normalize(communitymart.get("schema_name")).lower(),
-        "communitymart_owner_name": normalize_email(communitymart.get("owner_name")),
+        "communitymart_owner_name": communitymart_owner,
         "justification": normalize(payload.get("justification")),
         "additional_information": normalize(payload.get("additional_information")),
         "assignment_group": normalize(payload.get("assignment_group")),
         "epdg_ticket_url": epdg_ticket_url,
         "governance_approval_required": epdg_ticket_url != "",
-        "ad_approval_required": sandbox_owner != "" and ad_group_owner != "" and sandbox_owner != ad_group_owner,
+        "ad_approval_required": (
+            create_communitymart_schema
+            and sandbox_owner != ""
+            and communitymart_owner != ""
+            and sandbox_owner != communitymart_owner
+        ),
         "submitted_by": normalize_email(metadata.get("submitted_by")),
         "submitted_at_utc": normalize(metadata.get("submitted_at_utc")),
         "source_request_file": request_file.as_posix(),
