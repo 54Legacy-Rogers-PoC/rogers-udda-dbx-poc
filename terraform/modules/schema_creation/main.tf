@@ -6,7 +6,7 @@ locals {
   # Keep catalog defaults explicit until catalog selection is added to request payload.
   sandbox_catalog_name = "edlbi_ss"
   communitymart_catalog_name = "edl_communitymart"
-  communitymart_storage_base = "abfss://edl-community-mart@mazcacprdedlbidls01.dfs.core.windows.net/edl_community_mart"
+  communitymart_storage_base = "abfss://edl-community-mart@stadbdev.dfs.core.windows.net/edl_community_mart"
 
   sandbox_schema_name = lower(trimspace(var.sandbox_schema_name))
   sandbox_owner_name = lower(trimspace(var.sandbox_owner_name))
