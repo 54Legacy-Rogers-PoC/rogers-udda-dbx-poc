@@ -296,6 +296,49 @@ jobs:
           echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
           echo "Using computed backend key: $TFSTATE_KEY_EFFECTIVE"
 
+      - name: Ensure sandbox ADLS container exists
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sandbox_mode="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('sandbox_mode') or '').strip().lower())")"
+          if [ "$sandbox_mode" != "new" ]; then
+            echo "Sandbox mode is not new; skipping container check/create."
+            exit 0
+          fi
+
+          sandbox_schema_name="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('sandbox_schema_name') or '').strip().lower())")"
+          if [ -z "$sandbox_schema_name" ]; then
+            echo "sandbox_schema_name is required to derive sandbox container." >&2
+            exit 1
+          fi
+
+          sandbox_storage_account="stadbdev"
+          sandbox_container_suffix="$(SCHEMA="$sandbox_schema_name" python -c "import os; n=os.environ['SCHEMA']; p=[x for x in n.split('_') if x]; print('-'.join(p[1:-1]) if len(p)>2 else n.replace('_','-'))")"
+          sandbox_container="sandbox-${sandbox_container_suffix}"
+
+          echo "Checking ADLS container: ${sandbox_container}"
+          exists="$(az storage container exists \
+            --account-name "$sandbox_storage_account" \
+            --name "$sandbox_container" \
+            --auth-mode login \
+            --query exists -o tsv)"
+
+          if [ "$exists" = "true" ]; then
+            echo "ADLS container already exists: ${sandbox_container}"
+            exit 0
+          fi
+
+          echo "Creating ADLS container: ${sandbox_container}"
+          az storage container create \
+            --account-name "$sandbox_storage_account" \
+            --name "$sandbox_container" \
+            --auth-mode login \
+            --output none
+
+          echo "ADLS container created: ${sandbox_container}"
+
       - name: Generate tfvars JSON
         run: |
           python uda/scripts/schema-creation/generate_tfvars.py \
