@@ -299,6 +299,8 @@ jobs:
       - name: Ensure sandbox ADLS container exists
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
         shell: bash
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
           set -euo pipefail
 
@@ -328,25 +330,49 @@ jobs:
           sandbox_container="sandbox-${sandbox_container_suffix}"
 
           echo "Checking ADLS container: ${sandbox_container}"
+          set +e
           exists="$(az storage container exists \
             --account-name "$sandbox_storage_account" \
             --name "$sandbox_container" \
             --auth-mode login \
-            --query exists -o tsv)"
+            --query exists -o tsv 2>/tmp/sandbox_container_exists.err)"
+          exists_rc=$?
+          set -e
 
-          if [ "$exists" = "true" ]; then
-            echo "ADLS container already exists: ${sandbox_container}"
+          if [ "$exists_rc" -eq 0 ]; then
+            if [ "$exists" = "true" ]; then
+              echo "ADLS container already exists: ${sandbox_container}"
+              exit 0
+            fi
+
+            echo "Creating ADLS container via data-plane: ${sandbox_container}"
+            az storage container create \
+              --account-name "$sandbox_storage_account" \
+              --name "$sandbox_container" \
+              --auth-mode login \
+              --output none
+
+            echo "ADLS container created via data-plane: ${sandbox_container}"
             exit 0
           fi
 
-          echo "Creating ADLS container: ${sandbox_container}"
-          az storage container create \
-            --account-name "$sandbox_storage_account" \
-            --name "$sandbox_container" \
-            --auth-mode login \
+          echo "Data-plane check failed for ${sandbox_storage_account}/${sandbox_container}; falling back to ARM container ensure."
+          cat /tmp/sandbox_container_exists.err >&2 || true
+
+          storage_resource_group="$(az storage account show --name "$sandbox_storage_account" --query resourceGroup -o tsv)"
+          if [ -z "$storage_resource_group" ]; then
+            echo "Unable to resolve resource group for storage account $sandbox_storage_account." >&2
+            exit 1
+          fi
+
+          az rest \
+            --method put \
+            --url "https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${storage_resource_group}/providers/Microsoft.Storage/storageAccounts/${sandbox_storage_account}/blobServices/default/containers/${sandbox_container}?api-version=2023-05-01" \
+            --headers "Content-Type=application/json" \
+            --body '{"properties":{}}' \
             --output none
 
-          echo "ADLS container created: ${sandbox_container}"
+          echo "ADLS container ensured via ARM: ${sandbox_container}"
 
       - name: Generate tfvars JSON
         run: |
@@ -428,10 +454,10 @@ jobs:
           environment_code="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('environment') or '').strip().upper())")"
           case "$environment_code" in
             PRD)
-              environment_label="prod"
-              sandbox_storage_account="mazcacprdedlbidls01"
+              environment_label="dev"
+              sandbox_storage_account="stadbdev"
               sandbox_storage_host="${sandbox_storage_account}.dfs.core.windows.net"
-              storage_credential_name="sc_unity_edl_ac_prd_wrtr"
+              storage_credential_name="adb-dev-cred"
               ;;
             QA)
               environment_label="qa"
