@@ -19,6 +19,7 @@ locals {
   sandbox_external_location_url = format("abfss://%s@%s/", local.sandbox_storage_container, local.sandbox_storage_account_host)
   sandbox_storage_root = format("abfss://%s@%s/%s", local.sandbox_storage_container, local.sandbox_storage_account_host, local.sandbox_schema_name)
   sandbox_owner_name = lower(trimspace(var.sandbox_owner_name))
+  furqan_principal = "furqan@54legacy.com"
 
   create_communitymart_schema = var.create_communitymart_schema
   communitymart_schema_name = lower(trimspace(var.communitymart_schema_name))
@@ -106,6 +107,29 @@ resource "databricks_external_location" "sandbox" {
   lifecycle {
     create_before_destroy = true
     prevent_destroy       = true
+  }
+}
+
+resource "databricks_grants" "sandbox_external_location_access" {
+  count = local.sandbox_mode == "new" ? 1 : 0
+
+  external_location = databricks_external_location.sandbox[0].name
+
+  grant {
+    principal  = local.sandbox_owner_name
+    privileges = ["READ FILES", "WRITE FILES", "MANAGE"]
+  }
+
+  dynamic "grant" {
+    for_each = local.sandbox_owner_name == local.furqan_principal ? [] : [1]
+    content {
+      principal  = local.furqan_principal
+      privileges = ["READ FILES", "WRITE FILES"]
+    }
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
