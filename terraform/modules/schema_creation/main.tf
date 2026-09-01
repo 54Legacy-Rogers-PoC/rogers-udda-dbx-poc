@@ -13,6 +13,10 @@ locals {
   sandbox_schema_parts = split("_", local.sandbox_schema_name)
   sandbox_container_suffix = length(local.sandbox_schema_parts) > 2 ? join("-", slice(local.sandbox_schema_parts, 1, length(local.sandbox_schema_parts) - 1)) : replace(local.sandbox_schema_name, "_", "-")
   sandbox_storage_container = format("sandbox-%s", local.sandbox_container_suffix)
+  sandbox_environment_label = local.environment == "QA" ? "qa" : "dev"
+  sandbox_external_location_name = format("el_%s__%s__at__%s__rw", local.sandbox_environment_label, local.sandbox_storage_container, replace(local.sandbox_storage_account_host, ".dfs.core.windows.net", ""))
+  sandbox_storage_credential_name = "adb-dev-cred"
+  sandbox_external_location_url = format("abfss://%s@%s/", local.sandbox_storage_container, local.sandbox_storage_account_host)
   sandbox_storage_root = format("abfss://%s@%s/%s", local.sandbox_storage_container, local.sandbox_storage_account_host, local.sandbox_schema_name)
   sandbox_owner_name = lower(trimspace(var.sandbox_owner_name))
 
@@ -75,10 +79,29 @@ check "communitymart_owner_required_when_enabled" {
 resource "databricks_schema" "sandbox" {
   count = local.sandbox_mode == "new" ? 1 : 0
 
+  depends_on = [
+    databricks_external_location.sandbox,
+  ]
+
   catalog_name = local.sandbox_catalog_name
   name         = local.sandbox_schema_name
   storage_root = local.sandbox_storage_root
   comment      = format("Schema created from request %s", local.request_id)
+
+  lifecycle {
+    create_before_destroy = true
+    prevent_destroy       = true
+  }
+}
+
+resource "databricks_external_location" "sandbox" {
+  count = local.sandbox_mode == "new" ? 1 : 0
+
+  name            = local.sandbox_external_location_name
+  url             = local.sandbox_external_location_url
+  credential_name = local.sandbox_storage_credential_name
+  read_only       = false
+  comment         = "Managed by UDA schema workflow"
 
   lifecycle {
     create_before_destroy = true
