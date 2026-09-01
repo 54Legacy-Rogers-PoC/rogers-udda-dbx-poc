@@ -2,24 +2,37 @@ locals {
   request_id = trimspace(var.request_id)
   environment = upper(trimspace(var.environment))
   sandbox_mode = lower(trimspace(var.sandbox_mode))
+  environment_mapping = yamldecode(file("${path.module}/../../../uda/config/environment-mapping.yaml"))
+  environment_config_path = try(local.environment_mapping.config_files[local.environment], "")
+  environment_config = yamldecode(file("${path.module}/../../../${local.environment_config_path}"))
+  schema_creation_config = try(local.environment_config.schema_creation, {})
 
-  # Keep catalog defaults explicit until catalog selection is added to request payload.
-  sandbox_catalog_name = "edlbi_ss"
-  communitymart_catalog_name = "edl_communitymart"
-  sandbox_storage_account_host = "stadbdev.dfs.core.windows.net"
-  communitymart_storage_base = "abfss://edl-community-mart@stadbdev.dfs.core.windows.net/edl_community_mart"
+  sandbox_catalog_name = trimspace(local.schema_creation_config.sandbox_catalog_name)
+  communitymart_catalog_name = trimspace(local.schema_creation_config.communitymart_catalog_name)
+  sandbox_storage_account_name = trimspace(local.schema_creation_config.sandbox_storage_account_name)
+  sandbox_storage_account_host = format("%s.dfs.core.windows.net", local.sandbox_storage_account_name)
+  communitymart_storage_account_name = trimspace(local.schema_creation_config.communitymart_storage_account_name)
+  communitymart_storage_base = format(
+    "abfss://%s@%s.dfs.core.windows.net/%s",
+    trimspace(local.schema_creation_config.communitymart_container_name),
+    local.communitymart_storage_account_name,
+    trimspace(local.schema_creation_config.communitymart_storage_prefix)
+  )
 
   sandbox_schema_name = lower(trimspace(var.sandbox_schema_name))
   sandbox_schema_parts = split("_", local.sandbox_schema_name)
   sandbox_container_suffix = length(local.sandbox_schema_parts) > 2 ? join("-", slice(local.sandbox_schema_parts, 1, length(local.sandbox_schema_parts) - 1)) : replace(local.sandbox_schema_name, "_", "-")
   sandbox_storage_container = format("sandbox-%s", local.sandbox_container_suffix)
-  sandbox_environment_label = local.environment == "QA" ? "qa" : "dev"
+  sandbox_environment_label = lower(local.environment)
   sandbox_external_location_name = format("el_%s__%s__at__%s__rw", local.sandbox_environment_label, local.sandbox_storage_container, replace(local.sandbox_storage_account_host, ".dfs.core.windows.net", ""))
-  sandbox_storage_credential_name = "adb-dev-cred"
+  sandbox_storage_credential_name = trimspace(local.schema_creation_config.sandbox_storage_credential_name)
   sandbox_external_location_url = format("abfss://%s@%s/", local.sandbox_storage_container, local.sandbox_storage_account_host)
   sandbox_storage_root = format("abfss://%s@%s/%s", local.sandbox_storage_container, local.sandbox_storage_account_host, local.sandbox_schema_name)
   sandbox_owner_name = lower(trimspace(var.sandbox_owner_name))
-  furqan_principal = "furqan@54legacy.com"
+  default_external_location_rw_principals = toset([
+    for principal in var.default_external_location_rw_principals : lower(trimspace(principal))
+    if trimspace(principal) != ""
+  ])
 
   create_communitymart_schema = var.create_communitymart_schema
   communitymart_schema_name = lower(trimspace(var.communitymart_schema_name))
@@ -54,6 +67,17 @@ locals {
       }
     ]
   )
+
+  schema_creation_config_valid = alltrue([
+    local.environment_config_path != "",
+    local.sandbox_catalog_name != "",
+    local.communitymart_catalog_name != "",
+    local.sandbox_storage_account_name != "",
+    local.communitymart_storage_account_name != "",
+    trimspace(local.schema_creation_config.communitymart_container_name) != "",
+    trimspace(local.schema_creation_config.communitymart_storage_prefix) != "",
+    local.sandbox_storage_credential_name != "",
+  ])
 }
 
 check "sandbox_schema_name_required_for_new_mode" {
@@ -74,6 +98,13 @@ check "communitymart_owner_required_when_enabled" {
   assert {
     condition     = local.communitymart_owner_valid
     error_message = "communitymart_owner_name must be provided when create_communitymart_schema is true."
+  }
+}
+
+check "schema_creation_environment_config_complete" {
+  assert {
+    condition     = local.schema_creation_config_valid
+    error_message = format("schema_creation environment config is incomplete for %s in %s.", local.environment, local.environment_config_path)
   }
 }
 
@@ -121,9 +152,9 @@ resource "databricks_grants" "sandbox_external_location_access" {
   }
 
   dynamic "grant" {
-    for_each = local.sandbox_owner_name == local.furqan_principal ? [] : [1]
+    for_each = setsubtract(local.default_external_location_rw_principals, toset([local.sandbox_owner_name]))
     content {
-      principal  = local.furqan_principal
+      principal  = grant.value
       privileges = ["READ FILES", "WRITE FILES"]
     }
   }

@@ -6,6 +6,7 @@ module "schema_creation" {
   sandbox_mode                 = var.sandbox_mode
   sandbox_schema_name          = var.sandbox_schema_name
   sandbox_owner_name           = var.sandbox_owner_name
+  default_external_location_rw_principals = var.default_external_location_rw_principals
   create_communitymart_schema  = var.create_communitymart_schema
   communitymart_schema_name    = var.communitymart_schema_name
   communitymart_owner_name     = var.communitymart_owner_name

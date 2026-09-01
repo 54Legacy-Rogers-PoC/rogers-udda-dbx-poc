@@ -81,6 +81,7 @@ def _validate_contract_with_terraform(tfvars_payload: dict[str, Any], variables_
         "databricks_client_id",
         "databricks_client_secret",
         "databricks_tenant_id",
+        "default_external_location_rw_principals",
     }
     missing_relevant = [k for k in missing_keys if k not in ignored_missing]
 

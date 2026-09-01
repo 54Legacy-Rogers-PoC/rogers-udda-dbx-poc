@@ -226,79 +226,11 @@ jobs:
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
         shell: bash
         env:
+          NORMALIZED_JSON: ${{ env.NORMALIZED_JSON }}
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
-          set -euo pipefail
-
-          sandbox_mode="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('sandbox_mode') or '').strip().lower())")"
-          if [ "$sandbox_mode" != "new" ]; then
-            echo "Sandbox mode is not new; skipping container check/create."
-            exit 0
-          fi
-
-          sandbox_schema_name="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('sandbox_schema_name') or '').strip().lower())")"
-          if [ -z "$sandbox_schema_name" ]; then
-            echo "sandbox_schema_name is required to derive sandbox container." >&2
-            exit 1
-          fi
-
-          environment_code="$(python -c "import json,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); print((p.get('environment') or '').strip().upper())")"
-          case "$environment_code" in
-            PRD)
-              sandbox_storage_account="stadbdev"
-              ;;
-            *)
-              sandbox_storage_account="stadbdev"
-              ;;
-          esac
-
-          sandbox_container_suffix="$(SCHEMA="$sandbox_schema_name" python -c "import os; n=os.environ['SCHEMA']; p=[x for x in n.split('_') if x]; print('-'.join(p[1:-1]) if len(p)>2 else n.replace('_','-'))")"
-          sandbox_container="sandbox-${sandbox_container_suffix}"
-
-          echo "Checking ADLS container: ${sandbox_container}"
-          set +e
-          exists="$(az storage container exists \
-            --account-name "$sandbox_storage_account" \
-            --name "$sandbox_container" \
-            --auth-mode login \
-            --query exists -o tsv 2>/tmp/sandbox_container_exists.err)"
-          exists_rc=$?
-          set -e
-
-          if [ "$exists_rc" -eq 0 ]; then
-            if [ "$exists" = "true" ]; then
-              echo "ADLS container already exists: ${sandbox_container}"
-              exit 0
-            fi
-
-            echo "Creating ADLS container via data-plane: ${sandbox_container}"
-            az storage container create \
-              --account-name "$sandbox_storage_account" \
-              --name "$sandbox_container" \
-              --auth-mode login \
-              --output none
-
-            echo "ADLS container created via data-plane: ${sandbox_container}"
-            exit 0
-          fi
-
-          echo "Data-plane check failed for ${sandbox_storage_account}/${sandbox_container}; falling back to ARM container ensure."
-          cat /tmp/sandbox_container_exists.err >&2 || true
-
-          storage_resource_group="$(az storage account show --name "$sandbox_storage_account" --query resourceGroup -o tsv)"
-          if [ -z "$storage_resource_group" ]; then
-            echo "Unable to resolve resource group for storage account $sandbox_storage_account." >&2
-            exit 1
-          fi
-
-          az rest \
-            --method put \
-            --url "https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${storage_resource_group}/providers/Microsoft.Storage/storageAccounts/${sandbox_storage_account}/blobServices/default/containers/${sandbox_container}?api-version=2023-05-01" \
-            --headers "Content-Type=application/json" \
-            --body '{"properties":{}}' \
-            --output none
-
-          echo "ADLS container ensured via ARM: ${sandbox_container}"
+          # Keep environment-specific storage resolution in a helper so workflow YAML stays readable.
+          bash uda/scripts/schema-creation/ensure_sandbox_container.sh
 
       - name: Generate tfvars JSON
         run: |

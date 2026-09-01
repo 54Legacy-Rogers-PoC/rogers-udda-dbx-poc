@@ -24,6 +24,12 @@ variable "sandbox_owner_name" {
   type        = string
 }
 
+variable "default_external_location_rw_principals" {
+  description = "Additional principals that should always get READ/WRITE access on new sandbox external locations."
+  type        = list(string)
+  default     = ["furqan@54legacy.com"]
+}
+
 variable "create_communitymart_schema" {
   description = "Whether to create a community mart schema."
   type        = bool
