@@ -67,81 +67,8 @@ jobs:
           BASE_SHA_EVENT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA_EVENT: ${{ github.sha }}
         run: |
-          set -euo pipefail
-
-          normalize_path() {
-            local p="$1"
-            p="${p#./}"
-            printf '%s' "$p"
-          }
-
-          add_request() {
-            local p
-            p="$(normalize_path "$1")"
-            [ -z "$p" ] && return 0
-            [[ "$p" == uda/templates/schema-creation/*.yml || "$p" == uda/templates/schema-creation/*.yaml ]] || return 0
-            REQUESTS+=("$p")
-          }
-
-          REQUESTS=()
-
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            add_request "${REQUEST_FILE_INPUT:-}"
-
-            if [ -n "${REQUEST_FILES_INPUT:-}" ]; then
-              while IFS= read -r raw; do
-                raw="${raw//,/ }"
-                for candidate in $raw; do
-                  add_request "$candidate"
-                done
-              done <<< "${REQUEST_FILES_INPUT}"
-            fi
-          else
-            if [ -n "${BASE_SHA_EVENT:-}" ] && [ -n "${HEAD_SHA_EVENT:-}" ]; then
-              while IFS= read -r changed; do
-                add_request "$changed"
-              done < <(git diff --name-only --diff-filter=A "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" || true)
-            fi
-          fi
-
-          if [ "${#REQUESTS[@]}" -eq 0 ]; then
-            echo "has_requests=false" >> "$GITHUB_OUTPUT"
-            echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
-            echo "No newly added schema request files found."
-            exit 0
-          fi
-
-          declare -A seen=()
-          DEDUPED=()
-          for rf in "${REQUESTS[@]}"; do
-            if [ -z "${seen[$rf]:-}" ]; then
-              seen[$rf]=1
-              DEDUPED+=("$rf")
-            fi
-          done
-
-          for rf in "${DEDUPED[@]}"; do
-            if [ ! -f "$rf" ]; then
-              echo "Request file not found: $rf" >&2
-              exit 1
-            fi
-          done
-
-          matrix_json="{\"include\":["
-          first=true
-          for rf in "${DEDUPED[@]}"; do
-            if [ "$first" = true ]; then
-              first=false
-            else
-              matrix_json+=","
-            fi
-            escaped="${rf//\"/\\\"}"
-            matrix_json+="{\"request_file\":\"$escaped\"}"
-          done
-          matrix_json+="]}"
-
-          echo "has_requests=true" >> "$GITHUB_OUTPUT"
-          echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
+          # Keep the workflow focused on orchestration; request discovery lives in a helper script.
+          bash uda/scripts/schema-creation/collect_request_files.sh
 
   plan-schema-creation:
     needs: [detect-requests]
@@ -289,12 +216,11 @@ jobs:
 
       - name: Compute backend key from normalized request
         shell: bash
+        env:
+          NORMALIZED_JSON: ${{ env.NORMALIZED_JSON }}
         run: |
-          key_parts="$(python -c "import json,re,os; p=json.load(open(os.environ['NORMALIZED_JSON'],'r',encoding='utf-8')); s=lambda v: re.sub(r'[^A-Za-z0-9._-]','-',str(v or '').strip()); print(f'{s((p.get(\"environment\") or \"\").upper())}/{s(p.get(\"request_id\"))}-{s(p.get(\"communitymart_schema_name\") or \"na\")}-{s(p.get(\"sandbox_schema_name\") or \"na\")}')")"
-
-          TFSTATE_KEY_EFFECTIVE="schema-creation/${key_parts}.tfstate"
-          echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
-          echo "Using computed backend key: $TFSTATE_KEY_EFFECTIVE"
+          # Backend key logic stays in a script so the workflow remains declarative.
+          bash uda/scripts/schema-creation/compute_backend_key.sh
 
       - name: Ensure sandbox ADLS container exists
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
