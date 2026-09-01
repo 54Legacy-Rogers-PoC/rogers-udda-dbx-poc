@@ -9,12 +9,12 @@ governance:
 
 sandbox:
   selection: "New Sandbox"
-  schema_name: "slfsrv_manoj_reporting"
+  schema_name: "slfsrv_manoj23_reporting"
   owner_name: "furqan@54legacy.com"
 
 communitymart:
   create: true
-  schema_name: "vw_manoj_ops"
+  schema_name: "vw_manoj23_ops"
   owner_name: "jhansi@54legacy.com"
 
 ad_group:
