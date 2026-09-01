@@ -1,4 +1,4 @@
-name: DDD-DBX-04 UDA Databricks Cluster AD Group ADD
+name: UDA Databricks Cluster AD Group ADD
 
 on:
   workflow_dispatch:

@@ -1,4 +1,4 @@
-name: DDD-DBX-04 UDA Databricks Cluster AD Group REMOVE
+name: UDA Databricks Cluster AD Group REMOVE
 
 on:
   workflow_dispatch:
