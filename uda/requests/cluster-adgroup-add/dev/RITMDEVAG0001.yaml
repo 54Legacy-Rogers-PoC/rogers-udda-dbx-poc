@@ -3,7 +3,6 @@ platform: databricks
 request_type: cluster_ad_group
 environment: Development
 activity_type: ADD
-requester_email: data.requestor@rogers.com
 cluster_name: FINANCE_ANALYTICS_DEV
 cluster_id: 0821-161748-z2lj0o0q
 cluster_permission_level: CAN_RESTART

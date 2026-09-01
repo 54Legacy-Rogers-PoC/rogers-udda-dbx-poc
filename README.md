@@ -55,13 +55,14 @@ GitHub Actions expects repository secrets for Azure login:
 - `AZURE_TENANT_ID`
 - `KEYVAULT_NAME`
 
-GitHub Actions requester-email notification secrets:
+GitHub Actions optional completion-notification secrets (DL email):
 
 - `NOTIFY_SMTP_SERVER`
 - `NOTIFY_SMTP_PORT`
 - `NOTIFY_SMTP_USERNAME`
 - `NOTIFY_SMTP_PASSWORD`
 - `NOTIFY_FROM_EMAIL`
+- `NOTIFY_DL_EMAIL`
 
 Key Vault must provide Databricks and Terraform backend secrets consumed by `.github/actions/setup-dbxtf-env/action.yml`.
 

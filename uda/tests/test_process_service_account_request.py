@@ -43,7 +43,6 @@ platform: databricks
 request_type: service_account
 environment: Production
 activity_type: create
-requester_email: service.requestor@example.com
 service_account_type: Business
 service_account_name: SERV_SALES_SLS_ORA_DTB_PRD
 service_account_owner: Data Platform Team
@@ -61,7 +60,6 @@ justification: Finance reporting automation
 
     metadata = json.loads((output_dir / "request_metadata.json").read_text(encoding="utf-8"))
     assert metadata["activity_type"] == "CREATE"
-    assert metadata["requester_email"] == "service.requestor@example.com"
     assert metadata["requires_terraform"] is False
     assert metadata["environment"] == "PRD"
 

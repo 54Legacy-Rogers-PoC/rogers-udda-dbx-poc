@@ -18,7 +18,6 @@ class RequestContext:
     platform: str
     request_type: str
     environment: str
-    requester_email: str
     activity_type: str
     cluster_name: str
     cluster_id: str
@@ -98,7 +97,6 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
         platform=str(request["platform"]).strip().lower(),
         request_type=str(request["request_type"]).strip().lower(),
         environment=map_environment(str(request["environment"]).strip(), config),
-        requester_email=str(request.get("requester_email", "")).strip(),
         activity_type=normalize_activity(str(request["activity_type"])),
         cluster_name=str(request["cluster_name"]).strip(),
         cluster_id=str(request.get("cluster_id", "")).strip(),
@@ -179,7 +177,6 @@ def main() -> None:
 
     metadata = {
         "request_id": context.request_id,
-        "requester_email": context.requester_email,
         "environment": context.environment,
         "activity_type": context.activity_type,
         "cluster_name": context.cluster_name,
@@ -193,7 +190,6 @@ def main() -> None:
 
     execution_log = {
         "request_id": context.request_id,
-        "requester_email": context.requester_email,
         "environment": context.environment,
         "activity_type": context.activity_type,
         "cluster_name": context.cluster_name,

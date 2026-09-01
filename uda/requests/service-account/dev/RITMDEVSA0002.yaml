@@ -3,7 +3,6 @@
 # request_type: service_account
 # environment: Development
 # activity_type: remove_from_cluster
-# requester_email: data.requestor@rogers.com
 # service_account_type: Business
 # service_account_name: SERV_DATA_FINANCE_PBI_DEV
 # service_account_owner: Data Platform Team

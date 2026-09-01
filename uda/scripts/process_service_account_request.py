@@ -21,7 +21,6 @@ class RequestContext:
     activity_type: str
     service_account_type: str
     service_account_name: str
-    requester_email: str
     service_account_owner: str
     attached_to_ad_group: bool | None
     ad_group_name: str
@@ -154,7 +153,6 @@ def parse_request(request: dict[str, Any], config: dict[str, Any]) -> RequestCon
         activity_type=activity_type,
         service_account_type=str(request["service_account_type"]).strip(),
         service_account_name=str(request["service_account_name"]).strip(),
-        requester_email=str(request.get("requester_email", "")).strip(),
         service_account_owner=str(request["service_account_owner"]).strip(),
         attached_to_ad_group=attached_to_ad_group,
         ad_group_name=ad_group_name,
@@ -247,7 +245,6 @@ def main() -> None:
 
     metadata = {
         "request_id": context.request_id,
-        "requester_email": context.requester_email,
         "platform": context.platform,
         "request_type": context.request_type,
         "environment": context.environment,
@@ -269,7 +266,6 @@ def main() -> None:
         # Keep payload shape aligned with downstream CM stored procedure contract.
         "platform": "Databricks",
         "service_account_name": context.service_account_name,
-        "requester_email": context.requester_email,
         "service_account_type": context.service_account_type,
         "environment": context.environment,
         "request_type": context.request_type,
@@ -296,7 +292,6 @@ def main() -> None:
 
     execution_log = {
         "request_id": context.request_id,
-        "requester_email": context.requester_email,
         "service_account_name": context.service_account_name,
         "environment": context.environment,
         "activity_type": context.activity_type,

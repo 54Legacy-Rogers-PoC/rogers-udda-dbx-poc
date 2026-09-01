@@ -28,7 +28,6 @@ Use separate requests for ADD and REMOVE. A single request cannot mix both activ
 - `request_type` (`object_access`)
 - `environment` (`Production`, `QA/Test`, `Development`)
 - `activity_type` (`ADD` or `REMOVE`)
-- `requester_email` (used for completion notification)
 - `access_for` (`ad_group` or `service_account`)
 - `ad_group_name` or `service_account_name`
 - `template_file`
@@ -43,6 +42,7 @@ If a template row has blank `Activity`, request-level `activity_type` is used.
 - Plan runs for valid requests.
 - Apply runs only for `workflow_dispatch` with `auto_apply=true`.
 - Push-triggered runs are plan-only.
+- On completion, workflow sends email to the configured distribution list when `NOTIFY_*` and `NOTIFY_DL_EMAIL` secrets are present.
 
 ## Defaults
 - Duplicate template records fail the request.

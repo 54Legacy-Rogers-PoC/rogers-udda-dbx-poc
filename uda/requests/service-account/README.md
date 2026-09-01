@@ -38,7 +38,6 @@ Typical fields used by this DDD include:
 - `request_type` (`service_account`)
 - `environment` (`Production`, `QA/Test`, `Development`)
 - `activity_type`
-- `requester_email` (used for completion notification)
 - `service_account_name`
 - `service_account_owner`
 - `cluster_name` and `cluster_id` (for cluster activities)
@@ -52,6 +51,7 @@ Typical fields used by this DDD include:
 - Plan runs for valid requests.
 - Apply runs only for `workflow_dispatch` with `auto_apply=true`.
 - Push-triggered runs are plan-only.
+- On completion, workflow sends email to the configured distribution list when `NOTIFY_*` and `NOTIFY_DL_EMAIL` secrets are present.
 
 ## Notes
 - `cluster_id` is required for Databricks cluster permission resources.

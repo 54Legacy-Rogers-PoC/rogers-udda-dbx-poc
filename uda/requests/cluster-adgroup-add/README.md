@@ -26,7 +26,6 @@ Allowed values:
 - `request_type` (`cluster_adgroup`)
 - `environment` (`Production`, `QA/Test`, `Development`)
 - `activity_type` (`ADD`)
-- `requester_email` (used for completion notification)
 - `ad_group_name`
 - `cluster_name`
 - `cluster_id`
@@ -43,6 +42,7 @@ For REMOVE sample requests, use `uda/requests/cluster-adgroup-remove/README.md`.
 - Workflows are manual dispatch and activity-guarded:
   - Use ADD workflow for `activity_type: ADD`
   - Use REMOVE workflow for `activity_type: REMOVE`
+- On completion, workflow sends email to the configured distribution list when `NOTIFY_*` and `NOTIFY_DL_EMAIL` secrets are present.
 
 ## State Isolation
 This workflow uses a dedicated Terraform state key suffix to avoid cross-workflow state drift with other DDD workflows.

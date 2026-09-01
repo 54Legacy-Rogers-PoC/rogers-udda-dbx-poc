@@ -41,7 +41,6 @@ platform: databricks
 request_type: object_access
 environment: Production
 activity_type: ADD
-requester_email: object.requestor@example.com
 access_for: ad_group
 ad_group_name: DTB_DATA_ENG
 template_file: ObjectAccessTemplate.csv
@@ -74,7 +73,6 @@ schema,ADD,finance_catalog,reporting,,,\"USE_SCHEMA,SELECT\"
     assert tfvars["request_id"] == "RITM999001"
     assert tfvars["environment"] == "PRD"
     assert len(tfvars["object_access_records"]) == 2
-    assert metadata["requester_email"] == "object.requestor@example.com"
     assert metadata["object_count"] == 2
 
 

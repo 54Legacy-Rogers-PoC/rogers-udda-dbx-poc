@@ -43,7 +43,6 @@ platform: databricks
 request_type: cluster_ad_group
 environment: Development
 activity_type: ADD
-requester_email: adgroup.requestor@example.com
 cluster_name: FINANCE_ANALYTICS_DEV
 cluster_id: 0821-161748-z2lj0o0q
 ad_group_name: az_dtb_dev_allwrk_it_edg_rdr_gg
@@ -62,7 +61,6 @@ justification: Associate AD group
 
     assert metadata["environment"] == "DEV"
     assert metadata["activity_type"] == "ADD"
-    assert metadata["requester_email"] == "adgroup.requestor@example.com"
     assert metadata["ad_group_name"] == "az_dtb_dev_allwrk_it_edg_rdr_gg"
     assert len(tfvars["cluster_ad_group_access_records"]) == 1
     assert tfvars["cluster_ad_group_access_records"][0]["cluster_id"] == "0821-161748-z2lj0o0q"

@@ -35,7 +35,6 @@ jobs:
     outputs:
       request_file: ${{ steps.request_input.outputs.request_file }}
       request_id: ${{ steps.read_metadata.outputs.request_id }}
-      requester_email: ${{ steps.read_metadata.outputs.requester_email }}
       environment: ${{ steps.read_metadata.outputs.environment }}
       principal_type: ${{ steps.read_metadata.outputs.principal_type }}
       principal_name: ${{ steps.read_metadata.outputs.principal_name }}
@@ -69,7 +68,6 @@ jobs:
         id: read_metadata
         run: |
           echo "request_id=$(jq -r .request_id generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
-          echo "requester_email=$(jq -r '.requester_email // ""' generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "environment=$(jq -r .environment generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "principal_type=$(jq -r .principal_type generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "principal_name=$(jq -r .principal_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
@@ -434,7 +432,6 @@ jobs:
             echo ""
             echo "- Request File: ${{ needs.validate_request.outputs.request_file }}"
             echo "- Request ID: ${{ needs.validate_request.outputs.request_id }}"
-            echo "- Requester Email: ${{ needs.validate_request.outputs.requester_email || 'not_provided' }}"
             echo "- Principal Type: ${{ needs.validate_request.outputs.principal_type }}"
             echo "- Principal Name: ${{ needs.validate_request.outputs.principal_name }}"
             echo "- Environment: ${{ needs.validate_request.outputs.environment }}"
@@ -443,7 +440,7 @@ jobs:
             echo "- Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check notification configuration
+      - name: Determine notification configuration
         id: notify_config
         env:
           NOTIFY_SMTP_SERVER: ${{ secrets.NOTIFY_SMTP_SERVER }}
@@ -451,40 +448,45 @@ jobs:
           NOTIFY_SMTP_USERNAME: ${{ secrets.NOTIFY_SMTP_USERNAME }}
           NOTIFY_SMTP_PASSWORD: ${{ secrets.NOTIFY_SMTP_PASSWORD }}
           NOTIFY_FROM_EMAIL: ${{ secrets.NOTIFY_FROM_EMAIL }}
+          NOTIFY_DL_EMAIL: ${{ secrets.NOTIFY_DL_EMAIL }}
         run: |
-          if [ -n "$NOTIFY_SMTP_SERVER" ] && [ -n "$NOTIFY_SMTP_PORT" ] && [ -n "$NOTIFY_SMTP_USERNAME" ] && [ -n "$NOTIFY_SMTP_PASSWORD" ] && [ -n "$NOTIFY_FROM_EMAIL" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [ -n "$NOTIFY_SMTP_SERVER" ] && [ -n "$NOTIFY_SMTP_PORT" ] && [ -n "$NOTIFY_SMTP_USERNAME" ] && [ -n "$NOTIFY_SMTP_PASSWORD" ] && [ -n "$NOTIFY_FROM_EMAIL" ] && [ -n "$NOTIFY_DL_EMAIL" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Send completion email to requester
-        if: needs.validate_request.outputs.requester_email != '' && steps.notify_config.outputs.ready == 'true'
+      - name: Send completion email to distribution list
+        if: ${{ steps.notify_config.outputs.enabled == 'true' }}
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.NOTIFY_SMTP_SERVER }}
           server_port: ${{ secrets.NOTIFY_SMTP_PORT }}
           username: ${{ secrets.NOTIFY_SMTP_USERNAME }}
           password: ${{ secrets.NOTIFY_SMTP_PASSWORD }}
-          subject: "[UDA][DDD-DBX-02] Request ${{ needs.validate_request.outputs.request_id }} completed"
-          to: ${{ needs.validate_request.outputs.requester_email }}
+          subject: "UDA Databricks Object Access Completed - ${{ needs.validate_request.outputs.request_id }}"
+          to: ${{ secrets.NOTIFY_DL_EMAIL }}
           from: ${{ secrets.NOTIFY_FROM_EMAIL }}
           body: |
-            Your request has completed.
+            UDA Databricks Object Access workflow completed.
 
             Request ID: ${{ needs.validate_request.outputs.request_id }}
             Request File: ${{ needs.validate_request.outputs.request_file }}
             Environment: ${{ needs.validate_request.outputs.environment }}
-            Principal: ${{ needs.validate_request.outputs.principal_name }}
+            Principal: ${{ needs.validate_request.outputs.principal_type }} / ${{ needs.validate_request.outputs.principal_name }}
+            Object Count: ${{ needs.validate_request.outputs.object_count }}
             Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}
             Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}
+            Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-      - name: Notification configuration status
-        if: needs.validate_request.outputs.requester_email == '' || steps.notify_config.outputs.ready != 'true'
+      - name: Add notification status to summary
         run: |
-          echo "Requester email notification skipped. Ensure requester_email in request and SMTP secrets (NOTIFY_SMTP_SERVER, NOTIFY_SMTP_PORT, NOTIFY_SMTP_USERNAME, NOTIFY_SMTP_PASSWORD, NOTIFY_FROM_EMAIL)."
+          if [ "${{ steps.notify_config.outputs.enabled }}" = "true" ]; then
+            echo "- Notification DL Email: sent to configured distribution list" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Notification DL Email: skipped (missing notification secrets)" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Archive execution log
         uses: actions/upload-artifact@v4
