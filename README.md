@@ -55,16 +55,24 @@ GitHub Actions expects repository secrets for Azure login:
 - `AZURE_TENANT_ID`
 - `KEYVAULT_NAME`
 
-GitHub Actions optional completion-notification secrets (DL email):
+Key Vault must provide Databricks, Terraform backend, and completion-notification secrets consumed by the workflows.
 
-- `NOTIFY_SMTP_SERVER`
-- `NOTIFY_SMTP_PORT`
-- `NOTIFY_SMTP_USERNAME`
-- `NOTIFY_SMTP_PASSWORD`
-- `NOTIFY_FROM_EMAIL`
-- `NOTIFY_DL_EMAIL`
+Notification secret names in Key Vault:
 
-Key Vault must provide Databricks and Terraform backend secrets consumed by `.github/actions/setup-dbxtf-env/action.yml`.
+- `NOTIFY-SMTP-SERVER`
+- `NOTIFY-SMTP-PORT`
+- `NOTIFY-SMTP-USERNAME`
+- `NOTIFY-SMTP-PASSWORD`
+- `NOTIFY-FROM-EMAIL`
+- `NOTIFY-DL-EMAIL`
+
+Example to add the SMTP server secret to Key Vault:
+
+```powershell
+az keyvault secret set --vault-name <key-vault-name> --name NOTIFY-SMTP-SERVER --value <smtp-server-hostname>
+```
+
+Key Vault also provides Databricks and Terraform backend secrets consumed by `.github/actions/setup-dbxtf-env/action.yml`.
 
 ## Local Execution
 

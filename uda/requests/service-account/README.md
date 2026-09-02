@@ -51,7 +51,7 @@ Typical fields used by this DDD include:
 - Plan runs for valid requests.
 - Apply runs only for `workflow_dispatch` with `auto_apply=true`.
 - Push-triggered runs are plan-only.
-- On completion, workflow sends email to the configured distribution list when `NOTIFY_*` and `NOTIFY_DL_EMAIL` secrets are present.
+- On completion, workflow sends email to the configured distribution list when the Key Vault notification secrets are present.
 
 ## Notes
 - `cluster_id` is required for Databricks cluster permission resources.

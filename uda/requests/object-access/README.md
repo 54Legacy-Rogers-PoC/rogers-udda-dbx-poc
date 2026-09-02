@@ -42,7 +42,7 @@ If a template row has blank `Activity`, request-level `activity_type` is used.
 - Plan runs for valid requests.
 - Apply runs only for `workflow_dispatch` with `auto_apply=true`.
 - Push-triggered runs are plan-only.
-- On completion, workflow sends email to the configured distribution list when `NOTIFY_*` and `NOTIFY_DL_EMAIL` secrets are present.
+- On completion, workflow sends email to the configured distribution list when the Key Vault notification secrets are present.
 
 ## Defaults
 - Duplicate template records fail the request.

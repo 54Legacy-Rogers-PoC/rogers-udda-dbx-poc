@@ -207,15 +207,38 @@ jobs:
       - name: Determine notification configuration
         id: notify_config
         env:
-          NOTIFY_SMTP_SERVER: ${{ secrets.NOTIFY_SMTP_SERVER }}
-          NOTIFY_SMTP_PORT: ${{ secrets.NOTIFY_SMTP_PORT }}
-          NOTIFY_SMTP_USERNAME: ${{ secrets.NOTIFY_SMTP_USERNAME }}
-          NOTIFY_SMTP_PASSWORD: ${{ secrets.NOTIFY_SMTP_PASSWORD }}
-          NOTIFY_FROM_EMAIL: ${{ secrets.NOTIFY_FROM_EMAIL }}
-          NOTIFY_DL_EMAIL: ${{ secrets.NOTIFY_DL_EMAIL }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
         run: |
           set -euo pipefail
-          if [ -n "$NOTIFY_SMTP_SERVER" ] && [ -n "$NOTIFY_SMTP_PORT" ] && [ -n "$NOTIFY_SMTP_USERNAME" ] && [ -n "$NOTIFY_SMTP_PASSWORD" ] && [ -n "$NOTIFY_FROM_EMAIL" ] && [ -n "$NOTIFY_DL_EMAIL" ]; then
+          if [ -z "$KEYVAULT_NAME" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" >/dev/null
+
+          get_secret() {
+            az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$1" --query value -o tsv 2>/dev/null || true
+          }
+
+          notify_smtp_server=$(get_secret NOTIFY-SMTP-SERVER)
+          notify_smtp_port=$(get_secret NOTIFY-SMTP-PORT)
+          notify_smtp_username=$(get_secret NOTIFY-SMTP-USERNAME)
+          notify_smtp_password=$(get_secret NOTIFY-SMTP-PASSWORD)
+          notify_from_email=$(get_secret NOTIFY-FROM-EMAIL)
+          notify_dl_email=$(get_secret NOTIFY-DL-EMAIL)
+
+          if [ -n "$notify_smtp_server" ] && [ -n "$notify_smtp_port" ] && [ -n "$notify_smtp_username" ] && [ -n "$notify_smtp_password" ] && [ -n "$notify_from_email" ] && [ -n "$notify_dl_email" ]; then
+            printf 'smtp_server=%s\n' "$notify_smtp_server" >> "$GITHUB_OUTPUT"
+            printf 'smtp_port=%s\n' "$notify_smtp_port" >> "$GITHUB_OUTPUT"
+            printf 'smtp_username=%s\n' "$notify_smtp_username" >> "$GITHUB_OUTPUT"
+            printf 'smtp_password=%s\n' "$notify_smtp_password" >> "$GITHUB_OUTPUT"
+            printf 'from_email=%s\n' "$notify_from_email" >> "$GITHUB_OUTPUT"
+            printf 'dl_email=%s\n' "$notify_dl_email" >> "$GITHUB_OUTPUT"
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
@@ -225,13 +248,13 @@ jobs:
         if: ${{ steps.notify_config.outputs.enabled == 'true' }}
         uses: dawidd6/action-send-mail@v3
         with:
-          server_address: ${{ secrets.NOTIFY_SMTP_SERVER }}
-          server_port: ${{ secrets.NOTIFY_SMTP_PORT }}
-          username: ${{ secrets.NOTIFY_SMTP_USERNAME }}
-          password: ${{ secrets.NOTIFY_SMTP_PASSWORD }}
+          server_address: ${{ steps.notify_config.outputs.smtp_server }}
+          server_port: ${{ steps.notify_config.outputs.smtp_port }}
+          username: ${{ steps.notify_config.outputs.smtp_username }}
+          password: ${{ steps.notify_config.outputs.smtp_password }}
           subject: "UDA Databricks Cluster AD Group REMOVE Completed - ${{ needs.validate_request.outputs.request_id }}"
-          to: ${{ secrets.NOTIFY_DL_EMAIL }}
-          from: ${{ secrets.NOTIFY_FROM_EMAIL }}
+          to: ${{ steps.notify_config.outputs.dl_email }}
+          from: ${{ steps.notify_config.outputs.from_email }}
           body: |
             UDA Databricks Cluster AD Group REMOVE workflow completed.
 
@@ -250,9 +273,9 @@ jobs:
       - name: Add notification status to summary
         run: |
           if [ "${{ steps.notify_config.outputs.enabled }}" = "true" ]; then
-            echo "- Notification DL Email: sent to configured distribution list" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Notification DL Email: sent from Key Vault to configured distribution list" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- Notification DL Email: skipped (missing notification secrets)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Notification DL Email: skipped (missing Key Vault notification secrets)" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Archive execution log
