@@ -4,7 +4,7 @@
 This folder contains Request-as-Code YAML files for Databricks object-level access management.
 
 ## Paths
-- Requests: `uda/requests/object-access/`
+- Requests: `requests/object-access/`
 - Attachments: `uda/attachments/object-access/`
 - Template columns: `uda/templates/ObjectAccessTemplate.columns.md`
 - Workflow: `.github/workflows/uda-dbx-object-access.yml`
@@ -35,8 +35,8 @@ Use separate requests for ADD and REMOVE. A single request cannot mix both activ
 If a template row has blank `Activity`, request-level `activity_type` is used.
 
 ## Samples
-- `uda/requests/object-access/dev/RITMDEV0001.yaml`
-- `uda/requests/object-access/dev/RITMDEV0002.yaml`
+- `requests/object-access/dev/RITMDEV0001.yaml`
+- `requests/object-access/dev/RITMDEV0002.yaml`
 
 ## Execution Behavior
 - Plan runs for valid requests.

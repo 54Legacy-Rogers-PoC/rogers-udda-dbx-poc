@@ -6,10 +6,10 @@ This repository implements Request-as-Code workflows for Databricks access opera
 
 DDD-specific documentation is now maintained in each request folder:
 
-- DDD-DBX-01 Service Account Lifecycle: `uda/requests/service-account/README.md`
-- DDD-DBX-02 Object Access Management: `uda/requests/object-access/README.md`
-- DDD-DBX-04 Cluster AD Group ADD: `uda/requests/cluster-adgroup-add/README.md`
-- DDD-DBX-04 Cluster AD Group REMOVE: `uda/requests/cluster-adgroup-remove/README.md`
+- DDD-DBX-01 Service Account Lifecycle: `requests/service-account/README.md`
+- DDD-DBX-02 Object Access Management: `requests/object-access/README.md`
+- DDD-DBX-04 Cluster AD Group ADD: `requests/cluster-adgroup-add/README.md`
+- DDD-DBX-04 Cluster AD Group REMOVE: `requests/cluster-adgroup-remove/README.md`
 
 ## Repository Structure
 
@@ -28,14 +28,14 @@ uda/
   attachments/
   config/
   docs/
-  requests/
-    object-access/
-    service-account/
-    cluster-adgroup-add/
-    cluster-adgroup-remove/
   scripts/
   templates/
   tests/
+requests/
+  object-access/
+  service-account/
+  cluster-adgroup-add/
+  cluster-adgroup-remove/
 ```
 
 ## Workflow Behavior
@@ -72,7 +72,7 @@ Example to add the SMTP server secret to Key Vault:
 az keyvault secret set --vault-name <key-vault-name> --name NOTIFY-SMTP-SERVER --value <smtp-server-hostname>
 ```
 
-Key Vault also provides Databricks and Terraform backend secrets consumed by `.github/actions/setup-dbxtf-env/action.yml`.
+Key Vault also provides Databricks and Terraform backend secrets consumed by `.github/workflows/setup-dbxtf-env/action.yml`.
 
 ## Local Execution
 

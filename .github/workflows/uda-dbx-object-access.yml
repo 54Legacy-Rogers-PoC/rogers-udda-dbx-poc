@@ -6,7 +6,7 @@ on:
       request_file:
         description: "Path to the Request-as-Code YAML"
         required: true
-        default: "uda/requests/object-access/dev/RITMDEV0001.yaml"
+        default: "requests/object-access/dev/RITMDEV0001.yaml"
         type: string
       auto_apply:
         description: "Run terraform apply after successful plan"
@@ -17,7 +17,7 @@ on:
     branches:
       - main
     paths:
-      - "uda/requests/object-access/**"
+      - "requests/object-access/**"
       - "uda/attachments/object-access/**"
       - "uda/templates/ObjectAccessTemplate.columns.md"
       - "uda/scripts/process_request.py"
@@ -56,13 +56,13 @@ jobs:
       - name: Process request artifact
         run: |
           python uda/scripts/process_request.py \
-            --request-file "${{ github.event.inputs.request_file || 'uda/requests/object-access/dev/RITMDEV0001.yaml' }}" \
+            --request-file "${{ github.event.inputs.request_file || 'requests/object-access/dev/RITMDEV0001.yaml' }}" \
             --config-file "uda/config/environments.yaml" \
             --output-dir "generated"
 
       - name: Resolve request file path
         id: request_input
-        run: echo "request_file=${{ github.event.inputs.request_file || 'uda/requests/object-access/dev/RITMDEV0001.yaml' }}" >> "$GITHUB_OUTPUT"
+        run: echo "request_file=${{ github.event.inputs.request_file || 'requests/object-access/dev/RITMDEV0001.yaml' }}" >> "$GITHUB_OUTPUT"
 
       - name: Read request metadata
         id: read_metadata

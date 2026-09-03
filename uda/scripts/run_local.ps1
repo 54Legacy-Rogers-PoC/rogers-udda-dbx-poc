@@ -11,8 +11,8 @@ $ErrorActionPreference = "Stop"
 
 # Default sample request per supported request type.
 $defaultRequestByType = @{
-    "object-access" = "uda/requests/object-access/dev/RITMDEV0001.yaml"
-    "service-account" = "uda/requests/service-account/dev/RITMDEVSA0001.yaml"
+    "object-access" = "requests/object-access/dev/RITMDEV0001.yaml"
+    "service-account" = "requests/service-account/dev/RITMDEVSA0001.yaml"
 }
 
 if ([string]::IsNullOrWhiteSpace($RequestFile)) {

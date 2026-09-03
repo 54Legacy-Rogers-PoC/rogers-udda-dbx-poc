@@ -1,16 +1,16 @@
-# DDD-DBX-04 Cluster AD Group REMOVE
+# DDD-DBX-04 Cluster AD Group ADD
 
 ## Scope
-This folder contains Request-as-Code YAML files for removing AD group access from Databricks clusters.
+This folder contains Request-as-Code YAML files for adding AD group access to Databricks clusters.
 
 ## Paths
-- Requests: `uda/requests/cluster-adgroup-remove/`
-- REMOVE workflow: `.github/workflows/uda-dbx-cluster-adgroup-remove.yml`
+- Requests: `requests/cluster-adgroup-add/`
 - ADD workflow: `.github/workflows/uda-dbx-cluster-adgroup-add.yml`
+- REMOVE workflow: `.github/workflows/uda-dbx-cluster-adgroup-remove.yml`
 - Parser: `uda/scripts/process_cluster_adgroup_request.py`
 
 ## Supported Activity
-- `REMOVE`
+- `ADD`
 
 ## Cluster Permission Levels
 Use `cluster_permission_level` in each request.
@@ -25,25 +25,24 @@ Allowed values:
 - `platform` (`databricks`)
 - `request_type` (`cluster_adgroup`)
 - `environment` (`Production`, `QA/Test`, `Development`)
-- `activity_type` (`REMOVE`)
+- `activity_type` (`ADD`)
 - `ad_group_name`
 - `cluster_name`
 - `cluster_id`
 - `cluster_permission_level`
 
 ## Samples
-- `uda/requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml`
+- `requests/cluster-adgroup-add/dev/RITMDEVAG0001.yaml`
 
-For ADD sample requests, use `uda/requests/cluster-adgroup-add/README.md`.
+For REMOVE sample requests, use `requests/cluster-adgroup-remove/README.md`.
 
 ## Execution Behavior
 - Plan runs for valid requests.
 - Apply runs only for `workflow_dispatch` with `auto_apply=true`.
 - Workflows are manual dispatch and activity-guarded:
-  - Use REMOVE workflow for `activity_type: REMOVE`
   - Use ADD workflow for `activity_type: ADD`
+  - Use REMOVE workflow for `activity_type: REMOVE`
 - On completion, workflow sends email to the configured distribution list when the Key Vault notification secrets are present.
 
 ## State Isolation
-This workflow uses the dedicated DDD-DBX-04 Terraform state key suffix to avoid cross-workflow state drift.
-  
+This workflow uses a dedicated Terraform state key suffix to avoid cross-workflow state drift with other DDD workflows.

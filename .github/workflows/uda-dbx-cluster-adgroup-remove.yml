@@ -6,7 +6,7 @@ on:
       request_file:
         description: Path to the Request-as-Code YAML
         required: true
-        default: uda/requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml
+        default: requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml
         type: string
       auto_apply:
         description: Run terraform apply after successful plan
@@ -48,13 +48,13 @@ jobs:
       - name: Process cluster AD group request artifact
         run: |
           python uda/scripts/process_cluster_adgroup_request.py \
-            --request-file "${{ github.event.inputs.request_file || 'uda/requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml' }}" \
+            --request-file "${{ github.event.inputs.request_file || 'requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml' }}" \
             --config-file "uda/config/environments.yaml" \
             --output-dir "generated"
 
       - name: Resolve request file path
         id: request_input
-        run: echo "request_file=${{ github.event.inputs.request_file || 'uda/requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml' }}" >> "$GITHUB_OUTPUT"
+        run: echo "request_file=${{ github.event.inputs.request_file || 'requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml' }}" >> "$GITHUB_OUTPUT"
 
       - name: Read request metadata
         id: read_metadata
@@ -102,7 +102,7 @@ jobs:
           path: generated
 
       - name: Setup Azure + KeyVault + Terraform backend
-        uses: ./.github/actions/setup-dbxtf-env
+        uses: ./.github/workflows/setup-dbxtf-env
         with:
           azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
           azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -159,7 +159,7 @@ jobs:
           path: terraform
 
       - name: Setup Azure + KeyVault + Terraform backend
-        uses: ./.github/actions/setup-dbxtf-env
+        uses: ./.github/workflows/setup-dbxtf-env
         with:
           azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
           azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}

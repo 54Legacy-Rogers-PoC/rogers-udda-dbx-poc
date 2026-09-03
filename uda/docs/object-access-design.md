@@ -19,7 +19,7 @@ Policy: ADD and REMOVE must be submitted in separate requests.
 - Folders
 
 ## Execution Model
-1. Cloud administrator commits a request YAML under `uda/requests/object-access/`.
+1. Cloud administrator commits a request YAML under `requests/object-access/`.
 2. Cloud administrator commits the attached template under `uda/attachments/object-access/`.
 3. GitHub Actions validates and parses records.
 4. Parser emits `generated/terraform.auto.tfvars.json`.

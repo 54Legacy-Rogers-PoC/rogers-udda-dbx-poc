@@ -1,8 +1,9 @@
 terraform {
   required_version = ">= 1.6.0"
 
-
-backend "azurerm" {}
+  # Backend settings are injected at workflow runtime so state can be isolated
+  # per DDD without hardcoding storage details in the repo.
+  backend "azurerm" {}
 
   required_providers {
     databricks = {
@@ -12,6 +13,8 @@ backend "azurerm" {}
   }
 }
 
+# The workflows populate these variables from Azure Key Vault before running any
+# Terraform commands.
 provider "databricks" {
   host                      = var.databricks_host
   azure_client_id           = var.databricks_client_id

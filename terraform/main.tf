@@ -1,3 +1,5 @@
+# Normalize mixed request payloads once at the root, then hand filtered maps to
+# focused child modules.
 locals {
   normalized_records = [
     for r in var.object_access_records : merge(r, {
@@ -59,82 +61,38 @@ locals {
   }
 }
 
-resource "databricks_grant" "catalog_access" {
-  for_each = local.catalog_records
+# Object-level permissions stay grouped together because they share the same
+# request shape but target different Databricks securables.
+module "object_access" {
+  source = "./modules/object-access"
 
-  catalog    = each.value.catalog_name
-  principal  = each.value.principal_name
-  privileges = each.value.activity == "ADD" ? each.value.privileges : []
+  catalog_records = local.catalog_records
+  schema_records  = local.schema_records
+  view_records    = local.view_records
+  folder_records  = local.folder_records
 }
 
-resource "databricks_grant" "schema_access" {
-  for_each = local.schema_records
+# Service-account cluster access is isolated from object access so DDD-DBX-01
+# can evolve independently.
+module "service_account_cluster" {
+  source = "./modules/service-account-cluster"
 
-  schema     = "${each.value.catalog_name}.${each.value.schema_name}"
-  principal  = each.value.principal_name
-  privileges = each.value.activity == "ADD" ? each.value.privileges : []
+  add_records    = local.service_account_cluster_add_records
+  remove_records = local.service_account_cluster_remove_records
 }
 
-resource "databricks_grant" "view_access" {
-  for_each = local.view_records
+# AD group cluster ADD access is isolated so it mirrors the dedicated ADD
+# workflow and keeps Terraform addresses activity-specific.
+module "cluster_ad_group_add" {
+  source = "./modules/cluster-adgroup-add"
 
-  table      = "${each.value.catalog_name}.${each.value.schema_name}.${each.value.object_name}"
-  principal  = each.value.principal_name
-  privileges = each.value.activity == "ADD" ? each.value.privileges : []
+  add_records = local.cluster_ad_group_add_records
 }
 
-resource "databricks_permissions" "folder_access" {
-  for_each = local.folder_records
+# AD group cluster REMOVE access is isolated so it mirrors the dedicated REMOVE
+# workflow and avoids mixing both activity types inside one child module.
+module "cluster_ad_group_remove" {
+  source = "./modules/cluster-adgroup-remove"
 
-  directory_path = each.value.folder_path
-
-  access_control {
-    group_name       = each.value.principal_type == "ad_group" ? each.value.principal_name : null
-    service_principal_name = each.value.principal_type == "service_account" ? each.value.principal_name : null
-    permission_level = each.value.activity == "ADD" ? each.value.privileges[0] : "CAN_READ"
-  }
-}
-
-resource "databricks_permissions" "service_account_cluster_add" {
-  for_each = local.service_account_cluster_add_records
-
-  cluster_id = each.value.cluster_id
-
-  access_control {
-    service_principal_name = each.value.service_account_name
-    permission_level       = each.value.permission_level
-  }
-}
-
-resource "databricks_permissions" "service_account_cluster_remove" {
-  for_each = local.service_account_cluster_remove_records
-
-  cluster_id = each.value.cluster_id
-
-  access_control {
-    service_principal_name = each.value.service_account_name
-    permission_level       = each.value.permission_level
-  }
-}
-
-resource "databricks_permissions" "cluster_ad_group_add" {
-  for_each = local.cluster_ad_group_add_records
-
-  cluster_id = each.value.cluster_id
-
-  access_control {
-    group_name       = each.value.ad_group_name
-    permission_level = each.value.permission_level
-  }
-}
-
-resource "databricks_permissions" "cluster_ad_group_remove" {
-  for_each = local.cluster_ad_group_remove_records
-
-  cluster_id = each.value.cluster_id
-
-  access_control {
-    group_name       = each.value.ad_group_name
-    permission_level = each.value.permission_level
-  }
+  remove_records = local.cluster_ad_group_remove_records
 }

@@ -4,7 +4,7 @@
 This folder contains Request-as-Code YAML files for Databricks service account lifecycle operations.
 
 ## Paths
-- Requests: `uda/requests/service-account/`
+- Requests: `requests/service-account/`
 - Workflow: `.github/workflows/uda-dbx-service-account.yml`
 - Parser: `uda/scripts/process_service_account_request.py`
 
@@ -15,7 +15,7 @@ This folder contains Request-as-Code YAML files for Databricks service account l
 - `remove_from_cluster`
 - `change_ownership`
 
-AD group to cluster access changes are handled in DDD-DBX-04 under `uda/requests/cluster-adgroup-add/` and `uda/requests/cluster-adgroup-remove/`.
+AD group to cluster access changes are handled in DDD-DBX-04 under `requests/cluster-adgroup-add/` and `requests/cluster-adgroup-remove/`.
 
 ## Terraform-Required Activities
 - `add_to_cluster`
@@ -44,8 +44,8 @@ Typical fields used by this DDD include:
 - `cluster_permission_level` (for cluster activities)
 
 ## Samples
-- `uda/requests/service-account/dev/RITMDEVSA0001.yaml`
-- `uda/requests/service-account/dev/RITMDEVSA0003.yaml`
+- `requests/service-account/dev/RITMDEVSA0001.yaml`
+- `requests/service-account/dev/RITMDEVSA0003.yaml`
 
 ## Execution Behavior
 - Plan runs for valid requests.

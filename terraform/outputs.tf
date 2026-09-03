@@ -1,3 +1,5 @@
+# Root outputs keep request context available to workflow stages even after the
+# resources themselves are split into child modules.
 output "request_id" {
   description = "Request ID processed by this execution"
   value       = var.request_id
