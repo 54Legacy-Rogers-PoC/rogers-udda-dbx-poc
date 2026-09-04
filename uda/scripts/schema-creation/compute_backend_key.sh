@@ -12,4 +12,8 @@ key_parts="$(python -c "import json,re,os; p=json.load(open(os.environ['NORMALIZ
 
 TFSTATE_KEY_EFFECTIVE="schema-creation/${key_parts}.tfstate"
 echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
+echo "TFSTATE_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "tfstate_key=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_OUTPUT"
+fi
 echo "Using computed backend key: $TFSTATE_KEY_EFFECTIVE"
