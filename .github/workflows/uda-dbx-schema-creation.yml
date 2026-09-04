@@ -1,0 +1,215 @@
+name: UDA Databricks Schema Creation
+
+on:
+  push:
+    branches:
+      - feature/furqan-udda
+    paths:
+      - "requests/schema-creation/**"
+  pull_request:
+    branches:
+      - feature/furqan-udda
+    paths:
+      - "requests/schema-creation/**"
+  workflow_dispatch:
+    inputs:
+      request_file:
+        description: Path to a single schema request YAML file
+        required: true
+        default: requests/schema-creation/dev/RITM010101.yml
+        type: string
+      request_files:
+        description: Optional comma or newline separated schema request YAML paths
+        required: false
+        default: ""
+        type: string
+      run_plan:
+        description: Run Terraform plan stage
+        required: true
+        default: true
+        type: boolean
+      run_apply:
+        description: Run Terraform apply stage
+        required: true
+        default: false
+        type: boolean
+      allow_destroy:
+        description: Allow delete/replace actions in Terraform apply
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: uda-dbx-schema-creation-global
+  cancel-in-progress: false
+
+jobs:
+  detect-requests:
+    runs-on: ubuntu-latest
+    outputs:
+      has_requests: ${{ steps.collect.outputs.has_requests }}
+      matrix: ${{ steps.collect.outputs.matrix }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Collect request files
+        id: collect
+        shell: bash
+        env:
+          REQUEST_FILE_INPUT: ${{ inputs.request_file }}
+          REQUEST_FILES_INPUT: ${{ inputs.request_files }}
+          BASE_SHA_EVENT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA_EVENT: ${{ github.sha }}
+        run: |
+          # Keep the workflow focused on orchestration; request discovery lives in a helper script.
+          bash uda/scripts/schema-creation/collect_request_files.sh
+
+  plan-schema-creation:
+    needs: [detect-requests]
+    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.detect-requests.outputs.matrix) }}
+    env:
+      REQUEST_FILE: ${{ matrix.request_file }}
+      OUTPUT_ROOT: uda/output/schema-creation
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install workflow dependencies
+        run: |
+          pip install --only-binary=:all: pyyaml==6.0.2
+
+      - name: Prepare output paths
+        id: prep_paths
+        shell: bash
+        run: |
+          request_name="$(basename "$REQUEST_FILE")"
+          request_id="${request_name%.*}"
+          output_dir="$OUTPUT_ROOT/$request_id"
+          mkdir -p "$output_dir"
+
+          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
+          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
+          echo "NORMALIZED_JSON=$output_dir/$request_id.normalized.json" >> "$GITHUB_ENV"
+          echo "TFVARS_JSON=$output_dir/$request_id.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFPLAN_BIN=$output_dir/schema-creation.tfplan" >> "$GITHUB_ENV"
+          echo "TFPLAN_TXT=$output_dir/schema-creation-plan.txt" >> "$GITHUB_ENV"
+          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Validate schema request
+        run: |
+          python uda/scripts/schema-creation/validate_request.py \
+            --request-file "$REQUEST_FILE"
+
+      - name: Normalize schema request
+        run: |
+          python uda/scripts/schema-creation/normalize_request.py \
+            --request-file "$REQUEST_FILE" \
+            --output-json "$NORMALIZED_JSON"
+
+      - name: Compute backend key from normalized request
+        id: compute_backend_key
+        shell: bash
+        env:
+          NORMALIZED_JSON: ${{ env.NORMALIZED_JSON }}
+        run: |
+          # Backend key logic stays in a script so the workflow remains declarative.
+          bash uda/scripts/schema-creation/compute_backend_key.sh
+
+      - name: Setup Azure + KeyVault + Terraform backend
+        uses: ./.github/workflows/setup-dbxtf-env
+        with:
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          tfstate_key_override: ${{ steps.compute_backend_key.outputs.tfstate_key }}
+          terraform_working_directory: terraform/schema_creation
+
+      - name: Ensure sandbox ADLS container exists
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
+        shell: bash
+        env:
+          NORMALIZED_JSON: ${{ env.NORMALIZED_JSON }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          # Keep environment-specific storage resolution in a helper so workflow YAML stays readable.
+          bash uda/scripts/schema-creation/ensure_sandbox_container.sh
+
+      - name: Generate tfvars JSON
+        run: |
+          python uda/scripts/schema-creation/generate_tfvars.py \
+            --input-json "$NORMALIZED_JSON" \
+            --output-json "$TFVARS_JSON" \
+            --terraform-variables-file terraform/schema_creation/variables.tf
+
+      - name: Terraform plan
+        run: |
+          terraform -chdir=terraform/schema_creation plan \
+            -lock-timeout=10m \
+            -var-file="../../$TFVARS_JSON" \
+            -out="../../$TFPLAN_BIN"
+
+          terraform -chdir=terraform/schema_creation show -no-color "../../$TFPLAN_BIN" > "$TFPLAN_TXT"
+
+      - name: Block destructive plan unless explicitly allowed
+        shell: bash
+        env:
+          ALLOW_DESTROY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_destroy || 'false' }}
+        run: |
+          PLAN_JSON="$OUTPUT_DIR/schema-creation-plan.json"
+          terraform -chdir=terraform/schema_creation show -json "../../$TFPLAN_BIN" > "$PLAN_JSON"
+
+          destroy_count="$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' "$PLAN_JSON")"
+          echo "Plan delete/replace action count: $destroy_count"
+
+          if [ "$destroy_count" -gt 0 ] && [ "${ALLOW_DESTROY,,}" != "true" ]; then
+            echo "Destructive Terraform actions detected (delete/replace)." >&2
+            echo "Set workflow_dispatch input allow_destroy=true to permit apply for this run." >&2
+            exit 1
+          fi
+
+      - name: Terraform apply
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
+        run: |
+          terraform -chdir=terraform/schema_creation apply -lock-timeout=10m -auto-approve "../../$TFPLAN_BIN"
+
+      - name: Publish plan outputs
+        if: ${{ always() && steps.prep_paths.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: uda-dbx-schema-creation-plan-output-${{ steps.prep_paths.outputs.request_id }}
+          path: ${{ steps.prep_paths.outputs.output_dir }}
+          if-no-files-found: warn
+
+      - name: Write plan summary
+        if: always()
+        run: |
+          {
+            echo "## Schema Creation Plan Result"
+            echo "- Request file: $REQUEST_FILE"
+            echo "- Output dir: $OUTPUT_DIR"
+            echo "- Plan text: $TFPLAN_TXT"
+            echo "- Backend key: $TFSTATE_KEY"
+          } >> "$GITHUB_STEP_SUMMARY"

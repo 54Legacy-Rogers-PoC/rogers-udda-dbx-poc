@@ -47,6 +47,7 @@ requests/
   service-account/
   cluster-adgroup-add/
   cluster-adgroup-remove/
+  schema-creation/
 ```
 
 ## Workflow Behavior

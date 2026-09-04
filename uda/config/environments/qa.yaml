@@ -1,0 +1,19 @@
+﻿name: QA/Test
+code: QA
+keyvault:
+  name: <qa-keyvault-name>
+databricks:
+  host: ""
+terraform:
+  object_access_backend_key: addremove.tfstate
+  schema_creation_backend_key: schema-creation.tfstate
+
+schema_creation:
+  sandbox_catalog_name: edlbi_ss
+  communitymart_catalog_name: edl_communitymart
+  sandbox_storage_account_name: stadbdev
+  communitymart_storage_account_name: stadbdev
+  communitymart_container_name: edl-community-mart
+  communitymart_storage_prefix: edl_community_mart
+  sandbox_storage_credential_name: adb-dev-cred
+

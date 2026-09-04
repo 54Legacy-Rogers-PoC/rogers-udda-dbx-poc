@@ -21,6 +21,14 @@ inputs:
     description: Optional suffix appended to TFSTATE key to isolate workflow state
     required: false
     default: ""
+  tfstate_key_override:
+    description: Optional full TFSTATE key override. When set, this value is used as-is.
+    required: false
+    default: ""
+  terraform_working_directory:
+    description: Terraform working directory where init should run
+    required: false
+    default: terraform/environments/dev
 
 runs:
   using: composite
@@ -125,15 +133,20 @@ runs:
         TFSTATE_KEY_BASE=$(get_kv_secret "TF state key" TFSTATE-KEY-DBX)
         TFSTATE_ACCESS_KEY=$(try_kv_secret TFSTATE-ACCESS-KEY TFSTATE_ACCESS_KEY || true)
 
+        TFSTATE_KEY_OVERRIDE="${{ inputs.tfstate_key_override }}"
         TFSTATE_KEY_SUFFIX="${{ inputs.tfstate_key_suffix }}"
-        if [ -n "$TFSTATE_KEY_SUFFIX" ]; then
-          if [[ "$TFSTATE_KEY_BASE" == *.tfstate ]]; then
-            TFSTATE_KEY="${TFSTATE_KEY_BASE%.tfstate}-${TFSTATE_KEY_SUFFIX}.tfstate"
-          else
-            TFSTATE_KEY="${TFSTATE_KEY_BASE}-${TFSTATE_KEY_SUFFIX}"
-          fi
+        if [ -n "$TFSTATE_KEY_OVERRIDE" ]; then
+          TFSTATE_KEY="$TFSTATE_KEY_OVERRIDE"
         else
-          TFSTATE_KEY="$TFSTATE_KEY_BASE"
+          if [ -n "$TFSTATE_KEY_SUFFIX" ]; then
+            if [[ "$TFSTATE_KEY_BASE" == *.tfstate ]]; then
+              TFSTATE_KEY="${TFSTATE_KEY_BASE%.tfstate}-${TFSTATE_KEY_SUFFIX}.tfstate"
+            else
+              TFSTATE_KEY="${TFSTATE_KEY_BASE}-${TFSTATE_KEY_SUFFIX}"
+            fi
+          else
+            TFSTATE_KEY="$TFSTATE_KEY_BASE"
+          fi
         fi
 
         echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RG" >> "$GITHUB_ENV"
@@ -147,7 +160,7 @@ runs:
 
     - name: Terraform init
       shell: bash
-      working-directory: terraform/environments/dev
+      working-directory: ${{ inputs.terraform_working_directory }}
       run: |
         set -euo pipefail
         if [ -n "${TFSTATE_ACCESS_KEY:-}" ]; then
