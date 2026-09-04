@@ -7,7 +7,7 @@ This folder contains Request-as-Code YAML files for adding AD group access to Da
 - Requests: `requests/cluster-adgroup-add/`
 - ADD workflow: `.github/workflows/uda-dbx-cluster-adgroup-add.yml`
 - REMOVE workflow: `.github/workflows/uda-dbx-cluster-adgroup-remove.yml`
-- Parser: `uda/scripts/process_cluster_adgroup_request.py`
+- Parser: `uda/scripts/cluster-adgroup/process_cluster_adgroup_request.py`
 
 ## Supported Activity
 - `ADD`

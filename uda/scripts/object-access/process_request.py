@@ -284,7 +284,7 @@ def main() -> None:
     if context.request_type != "object_access":
         raise ValidationError("request_type must be object_access")
 
-    attachments_root = Path("uda/attachments/object-access")
+    attachments_root = Path("requests/object-access")
     template_path = attachments_root / context.template_file
     rows = load_template_rows(template_path, template_config)
 

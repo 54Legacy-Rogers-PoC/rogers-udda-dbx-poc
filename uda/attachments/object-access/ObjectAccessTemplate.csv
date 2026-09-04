@@ -1,4 +1,0 @@
-Object Type,Activity,Catalog Name,Schema Name,Object Name,Folder Path,Privileges
-catalog,ADD,fin_prd,,,,USE_CATALOG
-schema,ADD,fin_prd,reporting,,,"USE_SCHEMA,SELECT"
-view,ADD,fin_prd,reporting,vw_quarterly_revenue,,SELECT

@@ -47,7 +47,7 @@ jobs:
 
       - name: Process cluster AD group request artifact
         run: |
-          python uda/scripts/process_cluster_adgroup_request.py \
+          python uda/scripts/cluster-adgroup/process_cluster_adgroup_request.py \
             --request-file "${{ github.event.inputs.request_file || 'requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml' }}" \
             --config-file "uda/config/environments.yaml" \
             --output-dir "generated"

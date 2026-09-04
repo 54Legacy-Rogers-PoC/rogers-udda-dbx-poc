@@ -7,7 +7,7 @@ from pathlib import Path
 def run_invoke(payload_file: Path, status_file: Path, mode: str):
     cmd = [
         sys.executable,
-        str(Path(__file__).parents[1] / "scripts" / "invoke_cm_writeback.py"),
+        str(Path(__file__).parents[1] / "scripts" / "service-account" / "invoke_cm_writeback.py"),
         "--payload-file",
         str(payload_file),
         "--status-file",

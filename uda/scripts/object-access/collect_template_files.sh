@@ -57,8 +57,8 @@ resolve_template_path() {
     return 0
   fi
 
-  if [[ -f "uda/attachments/object-access/$template_value" ]]; then
-    printf '%s' "uda/attachments/object-access/$template_value"
+  if [[ -f "requests/object-access/$template_value" ]]; then
+    printf '%s' "requests/object-access/$template_value"
     return 0
   fi
 
@@ -121,7 +121,7 @@ if [[ -z "$base_sha" || "$base_sha" == "0000000000000000000000000000000000000000
   base_sha="$(git rev-parse HEAD~1)"
 fi
 
-mapfile -t changed_items < <(git diff --name-only --diff-filter=A "$base_sha" "$head_sha" -- "uda/attachments/object-access/*" "requests/object-access/*/*")
+mapfile -t changed_items < <(git diff --name-only --diff-filter=A "$base_sha" "$head_sha" -- "requests/object-access/*" "requests/object-access/*/*")
 
 existing_templates=()
 for f in "${changed_items[@]}"; do

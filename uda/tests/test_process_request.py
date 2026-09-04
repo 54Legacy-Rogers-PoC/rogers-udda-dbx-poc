@@ -7,7 +7,7 @@ from pathlib import Path
 def run_process_request(repo_root: Path, request_file: Path, config_file: Path, output_dir: Path):
     cmd = [
         sys.executable,
-        str(repo_root / "uda" / "scripts" / "process_request.py"),
+        str(repo_root / "uda" / "scripts" / "object-access" / "process_request.py"),
         "--request-file",
         str(request_file),
         "--config-file",
@@ -21,15 +21,14 @@ def run_process_request(repo_root: Path, request_file: Path, config_file: Path, 
 def test_success_path(tmp_path: Path):
     repo_root = tmp_path
 
-    (repo_root / "uda" / "scripts").mkdir(parents=True)
+    (repo_root / "uda" / "scripts" / "object-access").mkdir(parents=True)
     (repo_root / "uda" / "config").mkdir(parents=True)
-    (repo_root / "uda" / "attachments" / "object-access").mkdir(parents=True)
-    (repo_root / "uda" / "requests" / "object-access").mkdir(parents=True)
+    (repo_root / "requests" / "object-access").mkdir(parents=True)
 
-    source_script = Path(__file__).parents[1] / "scripts" / "process_request.py"
+    source_script = Path(__file__).parents[1] / "scripts" / "object-access" / "process_request.py"
     source_config = Path(__file__).parents[1] / "config" / "environments.yaml"
 
-    (repo_root / "uda" / "scripts" / "process_request.py").write_text(
+    (repo_root / "uda" / "scripts" / "object-access" / "process_request.py").write_text(
         source_script.read_text(encoding="utf-8"), encoding="utf-8"
     )
     (repo_root / "uda" / "config" / "environments.yaml").write_text(
@@ -46,13 +45,13 @@ ad_group_name: DTB_DATA_ENG
 template_file: ObjectAccessTemplate.csv
 justification: Team access
 """
-    (repo_root / "uda" / "requests" / "object-access" / "RITM999001.yaml").write_text(request_yaml, encoding="utf-8")
+    (repo_root / "requests" / "object-access" / "RITM999001.yaml").write_text(request_yaml, encoding="utf-8")
 
     template_csv = """Object Type,Activity,Catalog Name,Schema Name,Object Name,Folder Path,Privileges
 catalog,ADD,finance_catalog,,,,USE_CATALOG
 schema,ADD,finance_catalog,reporting,,,\"USE_SCHEMA,SELECT\"
 """
-    (repo_root / "uda" / "attachments" / "object-access" / "ObjectAccessTemplate.csv").write_text(
+    (repo_root / "requests" / "object-access" / "ObjectAccessTemplate.csv").write_text(
         template_csv, encoding="utf-8"
     )
 
@@ -60,7 +59,7 @@ schema,ADD,finance_catalog,reporting,,,\"USE_SCHEMA,SELECT\"
 
     result = run_process_request(
         repo_root=repo_root,
-        request_file=repo_root / "uda" / "requests" / "object-access" / "RITM999001.yaml",
+        request_file=repo_root / "requests" / "object-access" / "RITM999001.yaml",
         config_file=repo_root / "uda" / "config" / "environments.yaml",
         output_dir=output_dir,
     )
@@ -79,15 +78,14 @@ schema,ADD,finance_catalog,reporting,,,\"USE_SCHEMA,SELECT\"
 def test_duplicate_row_fails(tmp_path: Path):
     repo_root = tmp_path
 
-    (repo_root / "uda" / "scripts").mkdir(parents=True)
+    (repo_root / "uda" / "scripts" / "object-access").mkdir(parents=True)
     (repo_root / "uda" / "config").mkdir(parents=True)
-    (repo_root / "uda" / "attachments" / "object-access").mkdir(parents=True)
-    (repo_root / "uda" / "requests" / "object-access").mkdir(parents=True)
+    (repo_root / "requests" / "object-access").mkdir(parents=True)
 
-    source_script = Path(__file__).parents[1] / "scripts" / "process_request.py"
+    source_script = Path(__file__).parents[1] / "scripts" / "object-access" / "process_request.py"
     source_config = Path(__file__).parents[1] / "config" / "environments.yaml"
 
-    (repo_root / "uda" / "scripts" / "process_request.py").write_text(
+    (repo_root / "uda" / "scripts" / "object-access" / "process_request.py").write_text(
         source_script.read_text(encoding="utf-8"), encoding="utf-8"
     )
     (repo_root / "uda" / "config" / "environments.yaml").write_text(
@@ -104,13 +102,13 @@ service_account_name: svc_uda_dbx
 template_file: ObjectAccessTemplate.csv
 justification: Automation access
 """
-    (repo_root / "uda" / "requests" / "object-access" / "RITM999002.yaml").write_text(request_yaml, encoding="utf-8")
+    (repo_root / "requests" / "object-access" / "RITM999002.yaml").write_text(request_yaml, encoding="utf-8")
 
     template_csv = """Object Type,Activity,Catalog Name,Schema Name,Object Name,Folder Path,Privileges
 catalog,ADD,finance_catalog,,,,USE_CATALOG
 catalog,ADD,finance_catalog,,,,USE_CATALOG
 """
-    (repo_root / "uda" / "attachments" / "object-access" / "ObjectAccessTemplate.csv").write_text(
+    (repo_root / "requests" / "object-access" / "ObjectAccessTemplate.csv").write_text(
         template_csv, encoding="utf-8"
     )
 
@@ -118,7 +116,7 @@ catalog,ADD,finance_catalog,,,,USE_CATALOG
 
     result = run_process_request(
         repo_root=repo_root,
-        request_file=repo_root / "uda" / "requests" / "object-access" / "RITM999002.yaml",
+        request_file=repo_root / "requests" / "object-access" / "RITM999002.yaml",
         config_file=repo_root / "uda" / "config" / "environments.yaml",
         output_dir=output_dir,
     )
@@ -130,15 +128,14 @@ catalog,ADD,finance_catalog,,,,USE_CATALOG
 def test_mixed_row_activity_fails(tmp_path: Path):
     repo_root = tmp_path
 
-    (repo_root / "uda" / "scripts").mkdir(parents=True)
+    (repo_root / "uda" / "scripts" / "object-access").mkdir(parents=True)
     (repo_root / "uda" / "config").mkdir(parents=True)
-    (repo_root / "uda" / "attachments" / "object-access").mkdir(parents=True)
-    (repo_root / "uda" / "requests" / "object-access").mkdir(parents=True)
+    (repo_root / "requests" / "object-access").mkdir(parents=True)
 
-    source_script = Path(__file__).parents[1] / "scripts" / "process_request.py"
+    source_script = Path(__file__).parents[1] / "scripts" / "object-access" / "process_request.py"
     source_config = Path(__file__).parents[1] / "config" / "environments.yaml"
 
-    (repo_root / "uda" / "scripts" / "process_request.py").write_text(
+    (repo_root / "uda" / "scripts" / "object-access" / "process_request.py").write_text(
         source_script.read_text(encoding="utf-8"), encoding="utf-8"
     )
     (repo_root / "uda" / "config" / "environments.yaml").write_text(
@@ -155,13 +152,13 @@ ad_group_name: DTB_DATA_ENG
 template_file: ObjectAccessTemplate.csv
 justification: Team access
 """
-    (repo_root / "uda" / "requests" / "object-access" / "RITM999003.yaml").write_text(request_yaml, encoding="utf-8")
+    (repo_root / "requests" / "object-access" / "RITM999003.yaml").write_text(request_yaml, encoding="utf-8")
 
     template_csv = """Object Type,Activity,Catalog Name,Schema Name,Object Name,Folder Path,Privileges
 catalog,ADD,finance_catalog,,,,USE_CATALOG
 schema,REMOVE,finance_catalog,reporting,,,USE_SCHEMA
 """
-    (repo_root / "uda" / "attachments" / "object-access" / "ObjectAccessTemplate.csv").write_text(
+    (repo_root / "requests" / "object-access" / "ObjectAccessTemplate.csv").write_text(
         template_csv, encoding="utf-8"
     )
 
@@ -169,7 +166,7 @@ schema,REMOVE,finance_catalog,reporting,,,USE_SCHEMA
 
     result = run_process_request(
         repo_root=repo_root,
-        request_file=repo_root / "uda" / "requests" / "object-access" / "RITM999003.yaml",
+        request_file=repo_root / "requests" / "object-access" / "RITM999003.yaml",
         config_file=repo_root / "uda" / "config" / "environments.yaml",
         output_dir=output_dir,
     )

@@ -6,7 +6,7 @@ This folder contains Request-as-Code YAML files for Databricks service account l
 ## Paths
 - Requests: `requests/service-account/`
 - Workflow: `.github/workflows/uda-dbx-service-account.yml`
-- Parser: `uda/scripts/process_service_account_request.py`
+- Parser: `uda/scripts/service-account/process_service_account_request.py`
 
 ## Supported Activities
 - `create`

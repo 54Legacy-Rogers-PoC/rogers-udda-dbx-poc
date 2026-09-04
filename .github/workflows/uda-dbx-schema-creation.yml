@@ -145,7 +145,7 @@ jobs:
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
           tfstate_key_override: ${{ steps.compute_backend_key.outputs.tfstate_key }}
-          terraform_working_directory: terraform/schema_creation
+          terraform_working_directory: terraform/environments/dev
 
       - name: Ensure sandbox ADLS container exists
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
@@ -162,16 +162,16 @@ jobs:
           python uda/scripts/schema-creation/generate_tfvars.py \
             --input-json "$NORMALIZED_JSON" \
             --output-json "$TFVARS_JSON" \
-            --terraform-variables-file terraform/schema_creation/variables.tf
+            --terraform-variables-file terraform/environments/dev/variables.tf
 
       - name: Terraform plan
         run: |
-          terraform -chdir=terraform/schema_creation plan \
+          terraform -chdir=terraform/environments/dev plan \
             -lock-timeout=10m \
             -var-file="../../$TFVARS_JSON" \
             -out="../../$TFPLAN_BIN"
 
-          terraform -chdir=terraform/schema_creation show -no-color "../../$TFPLAN_BIN" > "$TFPLAN_TXT"
+          terraform -chdir=terraform/environments/dev show -no-color "../../$TFPLAN_BIN" > "$TFPLAN_TXT"
 
       - name: Block destructive plan unless explicitly allowed
         shell: bash
@@ -179,7 +179,7 @@ jobs:
           ALLOW_DESTROY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_destroy || 'false' }}
         run: |
           PLAN_JSON="$OUTPUT_DIR/schema-creation-plan.json"
-          terraform -chdir=terraform/schema_creation show -json "../../$TFPLAN_BIN" > "$PLAN_JSON"
+          terraform -chdir=terraform/environments/dev show -json "../../$TFPLAN_BIN" > "$PLAN_JSON"
 
           destroy_count="$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' "$PLAN_JSON")"
           echo "Plan delete/replace action count: $destroy_count"
@@ -193,7 +193,7 @@ jobs:
       - name: Terraform apply
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         run: |
-          terraform -chdir=terraform/schema_creation apply -lock-timeout=10m -auto-approve "../../$TFPLAN_BIN"
+          terraform -chdir=terraform/environments/dev apply -lock-timeout=10m -auto-approve "../../$TFPLAN_BIN"
 
       - name: Publish plan outputs
         if: ${{ always() && steps.prep_paths.outcome == 'success' }}

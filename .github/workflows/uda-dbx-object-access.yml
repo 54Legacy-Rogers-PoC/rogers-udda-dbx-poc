@@ -1,159 +1,102 @@
 name: UDA Databricks Object Access
 
 on:
-  push:
-    branches:
-      - feature/furqan-udda
-    paths:
-      - "requests/object-access/**"
-      - "uda/attachments/object-access/**"
-  pull_request:
-    branches:
-      - feature/furqan-udda
-    paths:
-      - "requests/object-access/**"
-      - "uda/attachments/object-access/**"
   workflow_dispatch:
     inputs:
       request_file:
-        description: Path to a single object-access request YAML file
+        description: "Path to the Request-as-Code YAML"
         required: true
-        default: requests/object-access/dev/RITMDEV0001.yaml
+        default: "requests/object-access/dev/RITMDEV0001.yaml"
         type: string
-      request_files:
-        description: Optional comma or newline separated object-access request YAML paths
-        required: false
-        default: ""
-        type: string
-      run_plan:
-        description: Run Terraform plan stage
-        required: true
-        default: true
-        type: boolean
-      run_apply:
-        description: Run Terraform apply stage
+      auto_apply:
+        description: "Run terraform apply after successful plan"
         required: true
         default: false
         type: boolean
+  push:
+    branches:
+      - main
+    paths:
+      - "requests/object-access/**"
+      - "uda/templates/ObjectAccessTemplate.columns.md"
+      - "uda/scripts/object-access/process_request.py"
+      - "uda/config/environments.yaml"
+      - ".github/workflows/uda-dbx-object-access.yml"
 
 permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: uda-dbx-object-access-global
-  cancel-in-progress: false
-
 jobs:
-  detect-templates:
+  validate_request:
+    name: Stage 1-3 Request and Template Validation
     runs-on: ubuntu-latest
     outputs:
-      has_templates: ${{ steps.collect.outputs.has_templates }}
-      matrix: ${{ steps.collect.outputs.matrix }}
-
+      request_file: ${{ steps.request_input.outputs.request_file }}
+      request_id: ${{ steps.read_metadata.outputs.request_id }}
+      environment: ${{ steps.read_metadata.outputs.environment }}
+      principal_type: ${{ steps.read_metadata.outputs.principal_type }}
+      principal_name: ${{ steps.read_metadata.outputs.principal_name }}
+      object_count: ${{ steps.read_metadata.outputs.object_count }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@v4
 
-      - name: Collect template files
-        id: collect
-        shell: bash
-        env:
-          REQUEST_FILE_INPUT: ${{ inputs.request_file }}
-          REQUEST_FILES_INPUT: ${{ inputs.request_files }}
-          BASE_SHA_EVENT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA_EVENT: ${{ github.sha }}
-        run: |
-          bash uda/scripts/object-access/collect_template_files.sh
-
-  plan-object-access:
-    needs: [detect-templates]
-    if: ${{ needs.detect-templates.outputs.has_templates == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
-    env:
-      TEMPLATE_FILE: ${{ matrix.template_file }}
-      OUTPUT_ROOT: uda/output/object-access
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: uda/scripts/object-access/requirements-ci.txt
 
-      - name: Install workflow dependencies
+      - name: Install dependencies
         run: |
-          pip install --only-binary=:all: pyyaml==6.0.2 openpyxl==3.1.5 xlrd==2.0.1
+          python -m pip install --upgrade pip
+          pip install -r uda/scripts/requirements.txt
 
-      - name: Prepare output paths
-        id: prep_paths
-        shell: bash
+      - name: Process request artifact
         run: |
-          template_name="$(basename "$TEMPLATE_FILE")"
-          request_id="${template_name%.*}"
-          output_dir="$OUTPUT_ROOT/$request_id"
-          mkdir -p "$output_dir"
-          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
-          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
-          echo "PARSED_JSON=$output_dir/parsed-object-access.json" >> "$GITHUB_ENV"
-          echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
-          echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
-          echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
-          echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
-          echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
-          echo "TFPLAN_MIXED_ADD_TXT=$output_dir/object-access-add-plan.txt" >> "$GITHUB_ENV"
-          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
-          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
+          python uda/scripts/object-access/process_request.py \
+            --request-file "${{ github.event.inputs.request_file || 'requests/object-access/dev/RITMDEV0001.yaml' }}" \
+            --config-file "uda/config/environments.yaml" \
+            --output-dir "generated"
 
-      - name: Validate object access template
+      - name: Resolve request file path
+        id: request_input
+        run: echo "request_file=${{ github.event.inputs.request_file || 'requests/object-access/dev/RITMDEV0001.yaml' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Read request metadata
+        id: read_metadata
         run: |
-          python uda/scripts/object-access/validate_template.py \
-            --template-file "$TEMPLATE_FILE" \
-            --sheet-name "Object List"
+          echo "request_id=$(jq -r .request_id generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "environment=$(jq -r .environment generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "principal_type=$(jq -r .principal_type generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "principal_name=$(jq -r .principal_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "object_count=$(jq -r .object_count generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Parse object access template
-        run: |
-          python uda/scripts/object-access/parse_template.py \
-            --template-file "$TEMPLATE_FILE" \
-            --sheet-name "Object List" \
-            --output-file "$PARSED_JSON"
+      - name: Upload generated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-generated
+          path: |
+            generated/terraform.auto.tfvars.json
+            generated/request_metadata.json
+            generated/execution_log.json
 
-      - name: Generate tfvars JSON
-        run: |
-          python uda/scripts/object-access/generate_tfvars.py \
-            --input-json "$PARSED_JSON" \
-            --output-json "$TFVARS_JSON"
+  terraform_plan:
+    name: Stage 4 Terraform Plan
+    runs-on: ubuntu-latest
+    needs:
+      - validate_request
+    outputs:
+      tf_plan_status: ${{ steps.plan_status.outputs.tf_plan_status }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Determine request activity from parsed rows
-        shell: bash
-        run: |
-          REQUEST_ACTIVITY="$(python uda/scripts/object-access/determine_request_activity.py --tfvars-json "$TFVARS_JSON")"
-          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
-          echo "$REQUEST_ACTIVITY" > "$OUTPUT_DIR/request_activity.txt"
-
-      - name: Build import tfvars for REMOVE targets
-        shell: bash
-        run: |
-          if [ "${REQUEST_ACTIVITY:-}" = "ADD" ]; then
-            echo "Import tfvars not needed for ADD-only request."
-            exit 0
-          fi
-
-          (
-            cd "$OUTPUT_DIR"
-            python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_import_tfvars.py"
-          )
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-generated
+          path: generated
 
       - name: Setup Azure + KeyVault + Terraform backend
         uses: ./.github/workflows/setup-dbxtf-env
@@ -163,249 +106,130 @@ jobs:
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
-          tfstate_key_override: addremove.tfstate
-          terraform_working_directory: terraform
+          tfstate_key_suffix: object-access
+
+      - name: Terraform validate
+        working-directory: terraform/environments/dev
+        run: terraform validate
 
       - name: Terraform plan
-        shell: bash
+        working-directory: terraform/environments/dev
         run: |
-          if [ "$REQUEST_ACTIVITY" != "ADD" ]; then
-            declare -a TARGETS=()
-            declare -A TARGET_IMPORT_ID=()
+          terraform plan \
+            -var-file="../../../generated/terraform.auto.tfvars.json" \
+            -out="tfplan.binary"
+          terraform show -no-color tfplan.binary > tfplan.txt
 
-            while IFS=$'\t' read -r target import_id; do
-              if [ -z "$target" ] || [ -z "$import_id" ]; then
-                continue
-              fi
-              TARGETS+=("$target")
-              TARGET_IMPORT_ID["$target"]="$import_id"
-            done < <(jq -r '.object_access_records[]
-              | select((.activity | ascii_upcase) == "REMOVE")
-              | if ((.object_type | ascii_upcase) == "CATALOG") then
-                  [
-                    "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
-                    "catalog/\(.catalog)/\(.principal_name)"
-                  ]
-                elif ((.object_type | ascii_upcase) == "SCHEMA") then
-                  [
-                    "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
-                    "schema/\(.catalog).\(.schema)/\(.principal_name)"
-                  ]
-                elif ((.object_type | ascii_upcase) == "VIEW") then
-                  [
-                    "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
-                    "table/\(.catalog).\(.schema).\(.object_name)/\(.principal_name)"
-                  ]
-                else empty end
-              | @tsv' "$TFVARS_JSON")
+      - name: Set plan status
+        id: plan_status
+        run: echo "tf_plan_status=success" >> "$GITHUB_OUTPUT"
 
-            if [ "${#TARGETS[@]}" -eq 0 ]; then
-              echo "No revoke targets found for REMOVE/REVOKE template." >&2
-              exit 1
-            fi
+      - name: Upload terraform plan output
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-terraform-plan
+          path: |
+            terraform/environments/dev/tfplan.binary
+            terraform/environments/dev/tfplan.txt
 
-            mapfile -t STATE_ADDRS < <(terraform -chdir=terraform state list || true)
+  terraform_apply:
+    name: Stage 5 Terraform Apply
+    runs-on: ubuntu-latest
+    needs:
+      - validate_request
+      - terraform_plan
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-            target_args=()
-            missing_targets=()
-            for t in "${TARGETS[@]}"; do
-              echo "Revoke target: $t"
-              if ! printf '%s\n' "${STATE_ADDRS[@]}" | grep -Fx -- "$t" >/dev/null; then
-                import_id="${TARGET_IMPORT_ID[$t]:-}"
-                if [ -n "$import_id" ]; then
-                  echo "Target not in state. Attempting import for revoke: $import_id"
-                  if terraform -chdir=terraform import -var-file="../$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
-                    echo "Imported missing target into state: $t"
-                    target_args+=("-target=$t")
-                    continue
-                  else
-                    echo "Import failed for target: $t"
-                  fi
-                fi
-                missing_targets+=("$t")
-                continue
-              fi
-              target_args+=("-target=$t")
-            done
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-generated
+          path: generated
 
-            if [ "${#missing_targets[@]}" -gt 0 ]; then
-              echo "Skipping revoke targets not found in backend state ($TFSTATE_KEY):"
-              printf ' - %s\n' "${missing_targets[@]}"
-              echo "Continuing with targets that are present in state."
-            fi
+      - name: Download terraform plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: uda-terraform-plan
+          path: terraform/environments/dev
 
-            if [ "${#target_args[@]}" -eq 0 ]; then
-              if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
-                echo "REMOVE request failed: none of the requested revoke targets were present in state and import did not succeed." >&2
-                exit 1
-              else
-                echo "No REMOVE targets available for MIXED template. Skipping REMOVE phase and continuing to ADD plan."
-                echo "true" > "$OUTPUT_DIR/remove-phase-skipped.flag"
-              fi
-            else
-              terraform -chdir=terraform plan \
-                -lock-timeout=10m \
-                -destroy \
-                -var-file="../$TFVARS_JSON" \
-                "${target_args[@]}" \
-                -out="../$TFPLAN_BIN"
-
-              terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
-            fi
-          else
-            terraform -chdir=terraform plan \
-              -lock-timeout=10m \
-              -var-file="../$TFVARS_JSON" \
-              -out="../$TFPLAN_BIN"
-
-            terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
-          fi
-
-          if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
-            echo "Generating ADD phase plan for MIXED activity template..."
-            terraform -chdir=terraform plan \
-              -lock-timeout=10m \
-              -var-file="../$TFVARS_JSON" \
-              -out="../$TFPLAN_MIXED_ADD_BIN"
-            terraform -chdir=terraform show -no-color "../$TFPLAN_MIXED_ADD_BIN" > "$TFPLAN_MIXED_ADD_TXT"
-          fi
+      - name: Setup Azure + KeyVault + Terraform backend
+        uses: ./.github/workflows/setup-dbxtf-env
+        with:
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          tfstate_key_suffix: object-access
 
       - name: Terraform apply
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
-        shell: bash
-        run: |
-          set -euo pipefail
+        working-directory: terraform/environments/dev
+        run: terraform apply -auto-approve tfplan.binary
 
-          REMOVE_PHASE_SKIPPED="false"
-          if [ "$REQUEST_ACTIVITY" = "MIXED" ] && [ -f "$OUTPUT_DIR/remove-phase-skipped.flag" ]; then
-            REMOVE_PHASE_SKIPPED="true"
-            echo "REMOVE phase was skipped during planning for MIXED template."
-          fi
-
-          if [ "$REQUEST_ACTIVITY" = "MIXED" ] && [ "$REMOVE_PHASE_SKIPPED" = "true" ]; then
-            echo "Skipping REMOVE apply phase and proceeding directly to ADD phase."
-          else
-            if [ "$REQUEST_ACTIVITY" != "ADD" ]; then
-              declare -a TARGETS=()
-              declare -A TARGET_IMPORT_ID=()
-
-              while IFS=$'\t' read -r target import_id; do
-                if [ -z "$target" ] || [ -z "$import_id" ]; then
-                  continue
-                fi
-                TARGETS+=("$target")
-                TARGET_IMPORT_ID["$target"]="$import_id"
-              done < <(jq -r '.object_access_records[]
-                | select((.activity | ascii_upcase) == "REMOVE")
-                | if ((.object_type | ascii_upcase) == "CATALOG") then
-                    [
-                      "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
-                      "catalog/\(.catalog)/\(.principal_name)"
-                    ]
-                  elif ((.object_type | ascii_upcase) == "SCHEMA") then
-                    [
-                      "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
-                      "schema/\(.catalog).\(.schema)/\(.principal_name)"
-                    ]
-                  elif ((.object_type | ascii_upcase) == "VIEW") then
-                    [
-                      "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
-                      "table/\(.catalog).\(.schema).\(.object_name)/\(.principal_name)"
-                    ]
-                  else empty end
-                | @tsv' "$TFVARS_JSON")
-
-              if [ "${#TARGETS[@]}" -eq 0 ]; then
-                echo "No revoke targets found for REMOVE/REVOKE template." >&2
-                exit 1
-              fi
-
-              mapfile -t STATE_ADDRS < <(terraform -chdir=terraform state list || true)
-
-              target_args=()
-              missing_targets=()
-              for t in "${TARGETS[@]}"; do
-                if ! printf '%s\n' "${STATE_ADDRS[@]}" | grep -Fx -- "$t" >/dev/null; then
-                  import_id="${TARGET_IMPORT_ID[$t]:-}"
-                  if [ -n "$import_id" ]; then
-                    echo "Target not in state. Attempting import for revoke: $import_id"
-                    if terraform -chdir=terraform import -var-file="../$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
-                      echo "Imported missing target into state: $t"
-                      target_args+=("-target=$t")
-                      continue
-                    else
-                      echo "Import failed for target: $t"
-                    fi
-                  fi
-                  missing_targets+=("$t")
-                  continue
-                fi
-                target_args+=("-target=$t")
-              done
-
-              if [ "${#missing_targets[@]}" -gt 0 ]; then
-                echo "Skipping revoke targets not found in backend state ($TFSTATE_KEY):"
-                printf ' - %s\n' "${missing_targets[@]}"
-                echo "Continuing with targets that are present in state."
-              fi
-
-              if [ "${#target_args[@]}" -eq 0 ]; then
-                if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
-                  echo "REMOVE request failed: none of the requested revoke targets were present in state and import did not succeed." >&2
-                  exit 1
-                fi
-
-                echo "No REMOVE targets available for MIXED template. Skipping REMOVE phase and continuing to ADD phase."
-              else
-                terraform -chdir=terraform plan \
-                  -lock-timeout=10m \
-                  -destroy \
-                  -var-file="../$TFVARS_JSON" \
-                  "${target_args[@]}" \
-                  -out="../$TFPLAN_BIN"
-                terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
-
-                if [ "$REQUEST_ACTIVITY" != "MIXED" ]; then
-                  exit 0
-                fi
-              fi
-            else
-              terraform -chdir=terraform plan \
-                -lock-timeout=10m \
-                -var-file="../$TFVARS_JSON" \
-                -out="../$TFPLAN_BIN"
-              terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
-              exit 0
-            fi
-          fi
-
-          if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
-            echo "Starting ADD phase for MIXED activity template..."
-            terraform -chdir=terraform plan \
-              -lock-timeout=10m \
-              -var-file="../$TFVARS_JSON" \
-              -out="../$TFPLAN_MIXED_ADD_BIN"
-            terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_MIXED_ADD_BIN"
-          fi
-
-      - name: Publish plan outputs
-        if: ${{ always() && steps.prep_paths.outcome == 'success' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+  notification:
+    name: Stage 6 Notification and Summary
+    runs-on: ubuntu-latest
+    needs:
+      - validate_request
+      - terraform_plan
+      - terraform_apply
+    if: always()
+    steps:
+      - name: Download generated artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: uda-dbx-object-access-plan-output-${{ steps.prep_paths.outputs.request_id }}
-          path: ${{ steps.prep_paths.outputs.output_dir }}
-          if-no-files-found: warn
+          name: uda-generated
+          path: generated
 
-      - name: Write plan summary
-        if: always()
+      - name: Publish workflow summary
         run: |
           {
-            echo "## Plan Result"
-            echo "- Template file: $TEMPLATE_FILE"
-            echo "- Output dir: $OUTPUT_DIR"
-            echo "- Request activity: $REQUEST_ACTIVITY"
-            echo "- Plan text: $TFPLAN_TXT"
-            if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
-              echo "- Add plan text: $TFPLAN_MIXED_ADD_TXT"
-            fi
+            echo "## Databricks Object Access Execution Summary"
+            echo ""
+            echo "- Request File: ${{ needs.validate_request.outputs.request_file }}"
+            echo "- Request ID: ${{ needs.validate_request.outputs.request_id }}"
+            echo "- Principal Type: ${{ needs.validate_request.outputs.principal_type }}"
+            echo "- Principal Name: ${{ needs.validate_request.outputs.principal_name }}"
+            echo "- Environment: ${{ needs.validate_request.outputs.environment }}"
+            echo "- Number of Objects Processed: ${{ needs.validate_request.outputs.object_count }}"
+            echo "- Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}"
+            echo "- Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Send completion notification
+        id: notify
+        uses: ./.github/workflows/send-dl-notification
+        with:
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          subject: "UDA Databricks Object Access Completed - ${{ needs.validate_request.outputs.request_id }}"
+          body: |
+            UDA Databricks Object Access workflow completed.
+
+            Request ID: ${{ needs.validate_request.outputs.request_id }}
+            Request File: ${{ needs.validate_request.outputs.request_file }}
+            Environment: ${{ needs.validate_request.outputs.environment }}
+            Principal: ${{ needs.validate_request.outputs.principal_type }} / ${{ needs.validate_request.outputs.principal_name }}
+            Object Count: ${{ needs.validate_request.outputs.object_count }}
+            Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}
+            Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}
+            Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Add notification status to summary
+        run: |
+          if [ "${{ steps.notify.outputs.status }}" = "sent" ]; then
+            echo "- Notification DL Email: sent from Key Vault to configured distribution list" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Notification DL Email: skipped (missing Key Vault notification secrets)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Archive execution log
+        uses: actions/upload-artifact@v4
+        with:
+          name: uda-execution-log
+          path: generated/execution_log.json

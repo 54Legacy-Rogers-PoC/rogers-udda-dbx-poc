@@ -24,8 +24,8 @@ if (-not (Test-Path -Path $RequestFile)) {
 }
 
 $processorByType = @{
-    "object-access" = "uda/scripts/process_request.py"
-    "service-account" = "uda/scripts/process_service_account_request.py"
+    "object-access" = "uda/scripts/object-access/process_request.py"
+    "service-account" = "uda/scripts/service-account/process_service_account_request.py"
 }
 
 $processor = $processorByType[$RequestType]

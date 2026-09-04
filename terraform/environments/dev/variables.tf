@@ -25,6 +25,7 @@ variable "object_access_records" {
     privileges     = list(string)
     justification  = string
   }))
+  default = []
 }
 
 # DDD-DBX-01 sends cluster actions separately from object access so the root
@@ -55,6 +56,92 @@ variable "cluster_ad_group_access_records" {
     permission_level = string
   }))
   default = []
+}
+
+# Schema-creation toggle and request inputs. These stay optional at the root so
+# only the schema workflow needs to set them.
+variable "schema_creation_enabled" {
+  description = "Whether to execute the schema_creation module in this run"
+  type        = bool
+  default     = false
+}
+
+variable "sandbox_mode" {
+  description = "Sandbox action mode for schema-creation requests"
+  type        = string
+  default     = ""
+}
+
+variable "sandbox_schema_name" {
+  description = "Sandbox schema name for schema-creation requests"
+  type        = string
+  default     = ""
+}
+
+variable "sandbox_owner_name" {
+  description = "Sandbox owner UPN/email for schema-creation requests"
+  type        = string
+  default     = ""
+}
+
+variable "default_external_location_rw_principals" {
+  description = "Additional principals for sandbox external location read/write access"
+  type        = list(string)
+  default     = ["furqan@54legacy.com"]
+}
+
+variable "create_communitymart_schema" {
+  description = "Whether to create a community mart schema"
+  type        = bool
+  default     = false
+}
+
+variable "communitymart_schema_name" {
+  description = "Community mart schema name"
+  type        = string
+  default     = ""
+}
+
+variable "communitymart_owner_name" {
+  description = "Community mart owner UPN/email"
+  type        = string
+  default     = ""
+}
+
+variable "justification" {
+  description = "Business justification"
+  type        = string
+  default     = ""
+}
+
+variable "additional_information" {
+  description = "Additional details from requester"
+  type        = string
+  default     = ""
+}
+
+variable "assignment_group" {
+  description = "Owning assignment group"
+  type        = string
+  default     = ""
+}
+
+variable "epdg_ticket_url" {
+  description = "Governance ticket URL when applicable"
+  type        = string
+  default     = ""
+}
+
+variable "governance_approval_required" {
+  description = "Whether governance approval is required"
+  type        = bool
+  default     = false
+}
+
+variable "ad_approval_required" {
+  description = "Whether AD approval is required"
+  type        = bool
+  default     = false
 }
 
 # Authentication inputs are injected at runtime from Azure Key Vault.

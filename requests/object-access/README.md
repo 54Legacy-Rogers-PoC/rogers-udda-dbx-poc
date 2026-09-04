@@ -5,10 +5,10 @@ This folder contains Request-as-Code YAML files for Databricks object-level acce
 
 ## Paths
 - Requests: `requests/object-access/`
-- Attachments: `uda/attachments/object-access/`
+- Attachments: `requests/object-access/`
 - Template columns: `uda/templates/ObjectAccessTemplate.columns.md`
 - Workflow: `.github/workflows/uda-dbx-object-access.yml`
-- Parser: `uda/scripts/process_request.py`
+- Parser: `uda/scripts/object-access/process_request.py`
 
 ## Supported Activities
 - `ADD`

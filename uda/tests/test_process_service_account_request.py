@@ -7,7 +7,7 @@ from pathlib import Path
 def run_process_request(repo_root: Path, request_file: Path, config_file: Path, output_dir: Path):
     cmd = [
         sys.executable,
-        str(repo_root / "uda" / "scripts" / "process_service_account_request.py"),
+        str(repo_root / "uda" / "scripts" / "service-account" / "process_service_account_request.py"),
         "--request-file",
         str(request_file),
         "--config-file",
@@ -19,14 +19,14 @@ def run_process_request(repo_root: Path, request_file: Path, config_file: Path, 
 
 
 def seed_repo_layout(repo_root: Path):
-    (repo_root / "uda" / "scripts").mkdir(parents=True)
+    (repo_root / "uda" / "scripts" / "service-account").mkdir(parents=True)
     (repo_root / "uda" / "config").mkdir(parents=True)
     (repo_root / "uda" / "requests" / "service-account").mkdir(parents=True)
 
-    source_script = Path(__file__).parents[1] / "scripts" / "process_service_account_request.py"
+    source_script = Path(__file__).parents[1] / "scripts" / "service-account" / "process_service_account_request.py"
     source_config = Path(__file__).parents[1] / "config" / "environments.yaml"
 
-    (repo_root / "uda" / "scripts" / "process_service_account_request.py").write_text(
+    (repo_root / "uda" / "scripts" / "service-account" / "process_service_account_request.py").write_text(
         source_script.read_text(encoding="utf-8"), encoding="utf-8"
     )
     (repo_root / "uda" / "config" / "environments.yaml").write_text(
