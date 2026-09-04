@@ -1,0 +1,19 @@
+request_id: RITMDEVAG0001
+platform: databricks
+request_type: cluster_ad_group
+environment: Development
+activity_type: ADD
+cluster_name: FINANCE_ANALYTICS_DEV
+cluster_id: 0821-161748-z2lj0o0q
+cluster_permission_level: CAN_RESTART
+# Allowed values: CAN_ATTACH_TO, CAN_RESTART, CAN_MANAGE
+subscription: Sub-Abeer-Rogers-NPE
+resource_group_name: rg-adb-dev-cace
+databricks_workspace_name: adb-cap-cac
+cluster_type: Shared
+cluster_owner: Data Platform Team
+cluster_department_name: Finance
+cluster_department_number: "1234567"
+ad_group_name: aad-databricks-cap-cac
+justification: Associate AD group to DEV cluster
+additional_information: DDD-DBX-04 baseline request for workflow_dispatch

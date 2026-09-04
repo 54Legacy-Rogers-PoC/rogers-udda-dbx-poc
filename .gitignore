@@ -1,10 +1,17 @@
-.terraform/
-**/.terraform/
+# Python
 __pycache__/
-*.py[cod]
+*.pyc
 .pytest_cache/
 
+# Terraform
 .terraform/
-terraform/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+tfplan.binary
 
-uda/output/
+# Generated UDA artifacts
+generated/
+
+# Local environment files
+.env

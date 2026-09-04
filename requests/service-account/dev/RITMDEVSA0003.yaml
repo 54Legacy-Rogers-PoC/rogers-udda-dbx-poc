@@ -1,0 +1,23 @@
+request_id: RITMDEVSA0003
+platform: databricks
+request_type: service_account
+environment: Development
+activity_type: add_to_cluster
+service_account_type: Business
+service_account_name: 44fbe099-d19d-4d8c-8b4d-b056550ec6de
+service_account_owner: Data Platform Team
+cluster_name: FINANCE_ANALYTICS_DEV
+cluster_id: 0821-161748-z2lj0o0q
+cluster_permission_level: CAN_ATTACH_TO
+# Allowed values: CAN_ATTACH_TO, CAN_RESTART, CAN_MANAGE
+subscription: Sub-Abeer-Rogers-NPE
+resource_group_name: rg-adb-dev-cace
+workspace_name: adb-cap-cac
+cluster_type: Shared
+cluster_owner: Data Platform Team
+cluster_scoa_department_name: Finance
+cluster_scoa_department_number: "1234567"
+department_scoa_number: "1234567"
+department_scoa_name: Finance
+justification: Attach service account to DEV cluster for workload execution
+additional_information: Separate lifecycle request for add_to_cluster per DDD-DBX-01

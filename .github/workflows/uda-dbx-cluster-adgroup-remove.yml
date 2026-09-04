@@ -1,28 +1,18 @@
-name: UDA Databricks Object Access
+name: UDA Databricks Cluster AD Group REMOVE
 
 on:
   workflow_dispatch:
     inputs:
       request_file:
-        description: "Path to the Request-as-Code YAML"
+        description: Path to the Request-as-Code YAML
         required: true
-        default: "requests/object-access/dev/RITMDEV0001.yaml"
+        default: requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml
         type: string
       auto_apply:
-        description: "Run terraform apply after successful plan"
+        description: Run terraform apply after successful plan
         required: true
         default: false
         type: boolean
-  push:
-    branches:
-      - main
-    paths:
-      - "requests/object-access/**"
-      - "uda/attachments/object-access/**"
-      - "uda/templates/ObjectAccessTemplate.columns.md"
-      - "uda/scripts/process_request.py"
-      - "uda/config/environments.yaml"
-      - ".github/workflows/uda-dbx-object-access.yml"
 
 permissions:
   contents: read
@@ -30,15 +20,17 @@ permissions:
 
 jobs:
   validate_request:
-    name: Stage 1-3 Request and Template Validation
+    name: Stage 1-2 Request Validation
     runs-on: ubuntu-latest
     outputs:
       request_file: ${{ steps.request_input.outputs.request_file }}
       request_id: ${{ steps.read_metadata.outputs.request_id }}
       environment: ${{ steps.read_metadata.outputs.environment }}
-      principal_type: ${{ steps.read_metadata.outputs.principal_type }}
-      principal_name: ${{ steps.read_metadata.outputs.principal_name }}
-      object_count: ${{ steps.read_metadata.outputs.object_count }}
+      activity_type: ${{ steps.read_metadata.outputs.activity_type }}
+      cluster_name: ${{ steps.read_metadata.outputs.cluster_name }}
+      ad_group_name: ${{ steps.read_metadata.outputs.ad_group_name }}
+      cluster_id: ${{ steps.read_metadata.outputs.cluster_id }}
+      cluster_permission_level: ${{ steps.read_metadata.outputs.cluster_permission_level }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -53,37 +45,47 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r uda/scripts/requirements.txt
 
-      - name: Process request artifact
+      - name: Process cluster AD group request artifact
         run: |
-          python uda/scripts/process_request.py \
-            --request-file "${{ github.event.inputs.request_file || 'requests/object-access/dev/RITMDEV0001.yaml' }}" \
+          python uda/scripts/process_cluster_adgroup_request.py \
+            --request-file "${{ github.event.inputs.request_file || 'requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml' }}" \
             --config-file "uda/config/environments.yaml" \
             --output-dir "generated"
 
       - name: Resolve request file path
         id: request_input
-        run: echo "request_file=${{ github.event.inputs.request_file || 'requests/object-access/dev/RITMDEV0001.yaml' }}" >> "$GITHUB_OUTPUT"
+        run: echo "request_file=${{ github.event.inputs.request_file || 'requests/cluster-adgroup-remove/dev/RITMDEVAG0002.yaml' }}" >> "$GITHUB_OUTPUT"
 
       - name: Read request metadata
         id: read_metadata
         run: |
           echo "request_id=$(jq -r .request_id generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "environment=$(jq -r .environment generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
-          echo "principal_type=$(jq -r .principal_type generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
-          echo "principal_name=$(jq -r .principal_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
-          echo "object_count=$(jq -r .object_count generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "activity_type=$(jq -r .activity_type generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "cluster_name=$(jq -r .cluster_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "ad_group_name=$(jq -r .ad_group_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "cluster_id=$(jq -r .cluster_id generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "cluster_permission_level=$(jq -r .cluster_permission_level generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce REMOVE activity for this workflow
+        run: |
+          ACTIVITY_TYPE=$(jq -r .activity_type generated/request_metadata.json)
+          if [ "$ACTIVITY_TYPE" != "REMOVE" ]; then
+            echo "ERROR: This workflow only supports activity_type=REMOVE. Use uda-dbx-cluster-adgroup-add.yml for ADD requests."
+            exit 1
+          fi
 
       - name: Upload generated artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: uda-generated
+          name: uda-cluster-adgroup-generated
           path: |
             generated/terraform.auto.tfvars.json
             generated/request_metadata.json
             generated/execution_log.json
 
   terraform_plan:
-    name: Stage 4 Terraform Plan
+    name: Stage 3 Terraform Plan
     runs-on: ubuntu-latest
     needs:
       - validate_request
@@ -96,7 +98,7 @@ jobs:
       - name: Download generated artifacts
         uses: actions/download-artifact@v4
         with:
-          name: uda-generated
+          name: uda-cluster-adgroup-generated
           path: generated
 
       - name: Setup Azure + KeyVault + Terraform backend
@@ -107,7 +109,7 @@ jobs:
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
-          tfstate_key_suffix: object-access
+          tfstate_key_suffix: cluster-adgroup
 
       - name: Terraform validate
         working-directory: terraform/environments/dev
@@ -128,13 +130,13 @@ jobs:
       - name: Upload terraform plan output
         uses: actions/upload-artifact@v4
         with:
-          name: uda-terraform-plan
+          name: uda-cluster-adgroup-terraform-plan
           path: |
             terraform/environments/dev/tfplan.binary
             terraform/environments/dev/tfplan.txt
 
   terraform_apply:
-    name: Stage 5 Terraform Apply
+    name: Stage 4 Terraform Apply
     runs-on: ubuntu-latest
     needs:
       - validate_request
@@ -147,13 +149,13 @@ jobs:
       - name: Download generated artifacts
         uses: actions/download-artifact@v4
         with:
-          name: uda-generated
+          name: uda-cluster-adgroup-generated
           path: generated
 
       - name: Download terraform plan artifact
         uses: actions/download-artifact@v4
         with:
-          name: uda-terraform-plan
+          name: uda-cluster-adgroup-terraform-plan
           path: terraform/environments/dev
 
       - name: Setup Azure + KeyVault + Terraform backend
@@ -164,14 +166,14 @@ jobs:
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
-          tfstate_key_suffix: object-access
+          tfstate_key_suffix: cluster-adgroup
 
       - name: Terraform apply
         working-directory: terraform/environments/dev
         run: terraform apply -auto-approve tfplan.binary
 
   notification:
-    name: Stage 6 Notification and Summary
+    name: Stage 5 Notification and Summary
     runs-on: ubuntu-latest
     needs:
       - validate_request
@@ -182,20 +184,22 @@ jobs:
       - name: Download generated artifacts
         uses: actions/download-artifact@v4
         with:
-          name: uda-generated
+          name: uda-cluster-adgroup-generated
           path: generated
 
       - name: Publish workflow summary
         run: |
           {
-            echo "## Databricks Object Access Execution Summary"
+            echo "## Databricks Cluster AD Group REMOVE Execution Summary"
             echo ""
             echo "- Request File: ${{ needs.validate_request.outputs.request_file }}"
             echo "- Request ID: ${{ needs.validate_request.outputs.request_id }}"
-            echo "- Principal Type: ${{ needs.validate_request.outputs.principal_type }}"
-            echo "- Principal Name: ${{ needs.validate_request.outputs.principal_name }}"
             echo "- Environment: ${{ needs.validate_request.outputs.environment }}"
-            echo "- Number of Objects Processed: ${{ needs.validate_request.outputs.object_count }}"
+            echo "- Activity Type: ${{ needs.validate_request.outputs.activity_type }}"
+            echo "- Cluster Name: ${{ needs.validate_request.outputs.cluster_name }}"
+            echo "- Cluster ID: ${{ needs.validate_request.outputs.cluster_id }}"
+            echo "- AD Group Name: ${{ needs.validate_request.outputs.ad_group_name }}"
+            echo "- Permission Level: ${{ needs.validate_request.outputs.cluster_permission_level }}"
             echo "- Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}"
             echo "- Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -208,15 +212,18 @@ jobs:
           azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
-          subject: "UDA Databricks Object Access Completed - ${{ needs.validate_request.outputs.request_id }}"
+          subject: "UDA Databricks Cluster AD Group REMOVE Completed - ${{ needs.validate_request.outputs.request_id }}"
           body: |
-            UDA Databricks Object Access workflow completed.
+            UDA Databricks Cluster AD Group REMOVE workflow completed.
 
             Request ID: ${{ needs.validate_request.outputs.request_id }}
             Request File: ${{ needs.validate_request.outputs.request_file }}
             Environment: ${{ needs.validate_request.outputs.environment }}
-            Principal: ${{ needs.validate_request.outputs.principal_type }} / ${{ needs.validate_request.outputs.principal_name }}
-            Object Count: ${{ needs.validate_request.outputs.object_count }}
+            Activity Type: ${{ needs.validate_request.outputs.activity_type }}
+            Cluster Name: ${{ needs.validate_request.outputs.cluster_name }}
+            Cluster ID: ${{ needs.validate_request.outputs.cluster_id }}
+            AD Group Name: ${{ needs.validate_request.outputs.ad_group_name }}
+            Permission Level: ${{ needs.validate_request.outputs.cluster_permission_level }}
             Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}
             Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}
             Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -232,5 +239,5 @@ jobs:
       - name: Archive execution log
         uses: actions/upload-artifact@v4
         with:
-          name: uda-execution-log
+          name: uda-cluster-adgroup-execution-log
           path: generated/execution_log.json
