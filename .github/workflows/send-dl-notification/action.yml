@@ -1,0 +1,93 @@
+name: Send Distribution List Notification
+description: Loads SMTP settings from Key Vault and sends a completion email to the configured distribution list.
+
+inputs:
+  azure_client_id:
+    description: Azure client ID
+    required: true
+  azure_client_secret:
+    description: Azure client secret
+    required: true
+  azure_tenant_id:
+    description: Azure tenant ID
+    required: true
+  keyvault_name:
+    description: Azure Key Vault name
+    required: true
+  subject:
+    description: Email subject line
+    required: true
+  body:
+    description: Email body content
+    required: true
+
+outputs:
+  status:
+    description: Notification result status
+    value: ${{ steps.notify_status.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve notification secrets
+      id: resolve_notify
+      shell: bash
+      env:
+        AZURE_CLIENT_ID: ${{ inputs.azure_client_id }}
+        AZURE_CLIENT_SECRET: ${{ inputs.azure_client_secret }}
+        AZURE_TENANT_ID: ${{ inputs.azure_tenant_id }}
+        KEYVAULT_NAME: ${{ inputs.keyvault_name }}
+      run: |
+        set -euo pipefail
+        if [ -z "$KEYVAULT_NAME" ]; then
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" >/dev/null
+
+        get_secret() {
+          az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$1" --query value -o tsv 2>/dev/null || true
+        }
+
+        notify_smtp_server=$(get_secret NOTIFY-SMTP-SERVER)
+        notify_smtp_port=$(get_secret NOTIFY-SMTP-PORT)
+        notify_smtp_username=$(get_secret NOTIFY-SMTP-USERNAME)
+        notify_smtp_password=$(get_secret NOTIFY-SMTP-PASSWORD)
+        notify_from_email=$(get_secret NOTIFY-FROM-EMAIL)
+        notify_dl_email=$(get_secret NOTIFY-DL-EMAIL)
+
+        if [ -n "$notify_smtp_server" ] && [ -n "$notify_smtp_port" ] && [ -n "$notify_smtp_username" ] && [ -n "$notify_smtp_password" ] && [ -n "$notify_from_email" ] && [ -n "$notify_dl_email" ]; then
+          printf 'smtp_server=%s\n' "$notify_smtp_server" >> "$GITHUB_OUTPUT"
+          printf 'smtp_port=%s\n' "$notify_smtp_port" >> "$GITHUB_OUTPUT"
+          printf 'smtp_username=%s\n' "$notify_smtp_username" >> "$GITHUB_OUTPUT"
+          printf 'smtp_password=%s\n' "$notify_smtp_password" >> "$GITHUB_OUTPUT"
+          printf 'from_email=%s\n' "$notify_from_email" >> "$GITHUB_OUTPUT"
+          printf 'dl_email=%s\n' "$notify_dl_email" >> "$GITHUB_OUTPUT"
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Send completion email to distribution list
+      if: ${{ steps.resolve_notify.outputs.enabled == 'true' }}
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: ${{ steps.resolve_notify.outputs.smtp_server }}
+        server_port: ${{ steps.resolve_notify.outputs.smtp_port }}
+        username: ${{ steps.resolve_notify.outputs.smtp_username }}
+        password: ${{ steps.resolve_notify.outputs.smtp_password }}
+        subject: ${{ inputs.subject }}
+        to: ${{ steps.resolve_notify.outputs.dl_email }}
+        from: ${{ steps.resolve_notify.outputs.from_email }}
+        body: ${{ inputs.body }}
+
+    - name: Set notification status
+      id: notify_status
+      shell: bash
+      run: |
+        if [ "${{ steps.resolve_notify.outputs.enabled }}" = "true" ]; then
+          echo "status=sent" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=skipped_missing_keyvault_notification_secrets" >> "$GITHUB_OUTPUT"
+        fi

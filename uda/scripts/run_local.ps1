@@ -54,6 +54,6 @@ if ($RequestType -eq "service-account") {
     }
 }
 
-terraform -chdir=terraform init
-terraform -chdir=terraform validate
-terraform -chdir=terraform plan -var-file=../generated/terraform.auto.tfvars.json
+terraform -chdir=terraform/environments/dev init
+terraform -chdir=terraform/environments/dev validate
+terraform -chdir=terraform/environments/dev plan -var-file=../../../generated/terraform.auto.tfvars.json

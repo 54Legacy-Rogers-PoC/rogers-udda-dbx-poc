@@ -16,14 +16,25 @@ DDD-specific documentation is now maintained in each request folder:
 ```
 # High-level repository layout
 .github/
-  actions/
-    setup-dbxtf-env/
   workflows/
+    send-dl-notification/
+    setup-dbxtf-env/
     uda-dbx-object-access.yml
     uda-dbx-service-account.yml
     uda-dbx-cluster-adgroup-add.yml
     uda-dbx-cluster-adgroup-remove.yml
 terraform/
+  environments/
+    dev/
+      main.tf
+      versions.tf
+      variables.tf
+      outputs.tf
+  modules/
+    object-access/
+    cluster-adgroup-add/
+    cluster-adgroup-remove/
+    service_account/
 uda/
   attachments/
   config/

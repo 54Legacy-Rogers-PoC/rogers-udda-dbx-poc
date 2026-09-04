@@ -147,7 +147,7 @@ runs:
 
     - name: Terraform init
       shell: bash
-      working-directory: terraform
+      working-directory: terraform/environments/dev
       run: |
         set -euo pipefail
         if [ -n "${TFSTATE_ACCESS_KEY:-}" ]; then

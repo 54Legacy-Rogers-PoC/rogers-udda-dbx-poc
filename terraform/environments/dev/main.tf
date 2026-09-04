@@ -64,7 +64,7 @@ locals {
 # Object-level permissions stay grouped together because they share the same
 # request shape but target different Databricks securables.
 module "object_access" {
-  source = "./modules/object-access"
+  source = "../../modules/object-access"
 
   catalog_records = local.catalog_records
   schema_records  = local.schema_records
@@ -75,7 +75,7 @@ module "object_access" {
 # Service-account cluster access is isolated from object access so DDD-DBX-01
 # can evolve independently.
 module "service_account_cluster" {
-  source = "./modules/service-account-cluster"
+  source = "../../modules/service_account"
 
   add_records    = local.service_account_cluster_add_records
   remove_records = local.service_account_cluster_remove_records
@@ -84,7 +84,7 @@ module "service_account_cluster" {
 # AD group cluster ADD access is isolated so it mirrors the dedicated ADD
 # workflow and keeps Terraform addresses activity-specific.
 module "cluster_ad_group_add" {
-  source = "./modules/cluster-adgroup-add"
+  source = "../../modules/cluster-adgroup-add"
 
   add_records = local.cluster_ad_group_add_records
 }
@@ -92,7 +92,7 @@ module "cluster_ad_group_add" {
 # AD group cluster REMOVE access is isolated so it mirrors the dedicated REMOVE
 # workflow and avoids mixing both activity types inside one child module.
 module "cluster_ad_group_remove" {
-  source = "./modules/cluster-adgroup-remove"
+  source = "../../modules/cluster-adgroup-remove"
 
   remove_records = local.cluster_ad_group_remove_records
 }
