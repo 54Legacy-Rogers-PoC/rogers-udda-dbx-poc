@@ -5,17 +5,18 @@ on:
     branches:
       - feature/furqan-udda
     paths:
-      - "uda/templates/schema-creation/**"
+      - "requests/schema-creation/**"
   pull_request:
     branches:
       - feature/furqan-udda
     paths:
-      - "uda/templates/schema-creation/**"
+      - "requests/schema-creation/**"
   workflow_dispatch:
     inputs:
       request_file:
         description: Path to a single schema request YAML file
         required: true
+        default: requests/schema-creation/dev/RITM010101.yml
         type: string
       request_files:
         description: Optional comma or newline separated schema request YAML paths

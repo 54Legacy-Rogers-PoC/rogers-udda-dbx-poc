@@ -13,7 +13,7 @@ add_request() {
   local p
   p="$(normalize_path "$1")"
   [ -z "$p" ] && return 0
-  [[ "$p" == uda/templates/schema-creation/*.yml || "$p" == uda/templates/schema-creation/*.yaml ]] || return 0
+  [[ "$p" == requests/schema-creation/*/*.yml || "$p" == requests/schema-creation/*/*.yaml ]] || return 0
   REQUESTS+=("$p")
 }
 

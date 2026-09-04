@@ -5,20 +5,23 @@ on:
     branches:
       - feature/furqan-udda
     paths:
+      - "requests/object-access/**"
       - "uda/attachments/object-access/**"
   pull_request:
     branches:
       - feature/furqan-udda
     paths:
+      - "requests/object-access/**"
       - "uda/attachments/object-access/**"
   workflow_dispatch:
     inputs:
-      template_file:
-        description: Path to a single Excel template file
+      request_file:
+        description: Path to a single object-access request YAML file
         required: true
+        default: requests/object-access/dev/RITMDEV0001.yaml
         type: string
-      template_files:
-        description: Optional comma or newline separated Excel template paths
+      request_files:
+        description: Optional comma or newline separated object-access request YAML paths
         required: false
         default: ""
         type: string
@@ -58,8 +61,8 @@ jobs:
         id: collect
         shell: bash
         env:
-          TEMPLATE_FILE_INPUT: ${{ inputs.template_file }}
-          TEMPLATE_FILES_INPUT: ${{ inputs.template_files }}
+          REQUEST_FILE_INPUT: ${{ inputs.request_file }}
+          REQUEST_FILES_INPUT: ${{ inputs.request_files }}
           BASE_SHA_EVENT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA_EVENT: ${{ github.sha }}
         run: |
