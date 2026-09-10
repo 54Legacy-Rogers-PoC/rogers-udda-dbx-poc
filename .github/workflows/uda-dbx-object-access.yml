@@ -4,15 +4,14 @@ on:
   push:
     branches:
       - feature/furqan-udda
+      - main
     paths:
-      - "requests/object-access/**"
-      - "uda/attachments/object-access/**"
+      - "requests/object-access/dev/**"
   pull_request:
     branches:
       - feature/furqan-udda
     paths:
-      - "requests/object-access/**"
-      - "uda/attachments/object-access/**"
+      - "requests/object-access/dev/**"
   workflow_dispatch:
     inputs:
       template_file:

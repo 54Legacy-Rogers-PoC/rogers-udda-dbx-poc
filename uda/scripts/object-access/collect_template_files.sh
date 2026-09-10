@@ -57,7 +57,7 @@ if [[ -z "$base_sha" || "$base_sha" == "0000000000000000000000000000000000000000
 fi
 
 mapfile -t changed_templates < <(
-  git diff --name-only --diff-filter=A "$base_sha" "$head_sha" -- "requests/object-access" "uda/attachments/object-access" || true
+  git diff --name-only --diff-filter=A "$base_sha" "$head_sha" -- "requests/object-access/dev" || true
 )
 
 existing_templates=()
