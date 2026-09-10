@@ -6,7 +6,6 @@ on:
       request_file:
         description: "Path to the Request-as-Code YAML"
         required: true
-        default: "requests/object-access/dev/RITMDEV0001.yaml"
         type: string
       auto_apply:
         description: "Run terraform apply after successful plan"
@@ -18,10 +17,6 @@ on:
       - main
     paths:
       - "requests/object-access/**"
-      - "uda/templates/ObjectAccessTemplate.columns.md"
-      - "uda/scripts/object-access/process_request.py"
-      - "uda/config/environments.yaml"
-      - ".github/workflows/uda-dbx-object-access.yml"
 
 permissions:
   contents: read

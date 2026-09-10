@@ -255,6 +255,23 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dump(payload, file, indent=2)
 
 
+def resolve_template_path(request_file: Path, template_name: str) -> Path:
+    template_value = Path(template_name)
+
+    candidates = [
+        template_value,
+        request_file.parent / template_value,
+        Path("requests/object-access") / template_value,
+        Path.cwd() / "requests/object-access" / template_value,
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return Path("requests/object-access") / template_value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Process UDA Databricks object access requests")
     parser.add_argument("--request-file", required=True)
@@ -284,8 +301,7 @@ def main() -> None:
     if context.request_type != "object_access":
         raise ValidationError("request_type must be object_access")
 
-    attachments_root = Path("requests/object-access")
-    template_path = attachments_root / context.template_file
+    template_path = resolve_template_path(request_file, context.template_file)
     rows = load_template_rows(template_path, template_config)
 
     require_columns(rows, template_config["required_columns"])
