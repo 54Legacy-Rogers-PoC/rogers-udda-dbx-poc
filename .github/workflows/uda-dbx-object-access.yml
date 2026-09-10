@@ -78,14 +78,14 @@ jobs:
     needs: [detect-templates]
     if: ${{ needs.detect-templates.outputs.has_templates == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || github.ref_name == 'main' && 'prod' || github.ref_name == 'qa' && 'qa' || 'dev' }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
     env:
-      TARGET_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || github.ref_name == 'main' && 'prod' || github.ref_name == 'qa' && 'qa' || 'dev' }}
-      TERRAFORM_WORKING_DIR: ${{ format('terraform/environments/{0}', github.event_name == 'workflow_dispatch' && inputs.environment || github.ref_name == 'main' && 'prod' || github.ref_name == 'qa' && 'qa' || 'dev') }}
+      TARGET_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+      TERRAFORM_WORKING_DIR: ${{ format('terraform/environments/{0}', github.event_name == 'workflow_dispatch' && inputs.environment || 'dev') }}
       TEMPLATE_FILE: ${{ matrix.template_file }}
       OUTPUT_ROOT: uda/output/object-access
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -180,6 +180,12 @@ jobs:
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
           set -euo pipefail
+          if [ ! -d "$GITHUB_WORKSPACE/${TERRAFORM_WORKING_DIR}" ]; then
+            echo "Terraform directory not found: ${TERRAFORM_WORKING_DIR}" >&2
+            echo "Supported environments in this repo: dev" >&2
+            exit 1
+          fi
+
           rm -rf .terraform
           terraform init -reconfigure \
             -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
