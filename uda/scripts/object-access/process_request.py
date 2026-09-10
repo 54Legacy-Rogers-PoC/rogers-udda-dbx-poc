@@ -269,6 +269,22 @@ def resolve_template_path(request_file: Path, template_name: str) -> Path:
         if candidate.exists():
             return candidate
 
+    request_dir = request_file.parent
+    supported_extensions = (".csv", ".xlsx", ".xlsm", ".xls")
+    request_dir_candidates = sorted(
+        p for p in request_dir.iterdir() if p.is_file() and p.suffix.lower() in supported_extensions
+    )
+    if request_dir_candidates:
+        return request_dir_candidates[0]
+
+    top_level_candidates = sorted(
+        p
+        for p in Path("requests/object-access").iterdir()
+        if p.is_file() and p.suffix.lower() in supported_extensions
+    )
+    if top_level_candidates:
+        return top_level_candidates[0]
+
     return Path("requests/object-access") / template_value
 
 

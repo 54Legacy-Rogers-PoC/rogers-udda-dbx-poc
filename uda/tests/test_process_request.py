@@ -174,6 +174,55 @@ catalog,ADD,finance_catalog,,,,USE_CATALOG
     assert metadata["request_id"] == "RITM999004"
 
 
+def test_uses_first_supported_template_in_request_folder_when_name_does_not_match(tmp_path: Path):
+    repo_root = tmp_path
+
+    (repo_root / "uda" / "scripts" / "object-access").mkdir(parents=True)
+    (repo_root / "uda" / "config").mkdir(parents=True)
+    (repo_root / "requests" / "object-access" / "dev").mkdir(parents=True)
+
+    source_script = Path(__file__).parents[1] / "scripts" / "object-access" / "process_request.py"
+    source_config = Path(__file__).parents[1] / "config" / "environments.yaml"
+
+    (repo_root / "uda" / "scripts" / "object-access" / "process_request.py").write_text(
+        source_script.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (repo_root / "uda" / "config" / "environments.yaml").write_text(
+        source_config.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    request_yaml = """request_id: RITM999005
+platform: databricks
+request_type: object_access
+environment: Development
+activity_type: ADD
+access_for: ad_group
+ad_group_name: DTB_FINANCE_ANALYTICS_DEV
+template_file: SomeOtherName.csv
+justification: Auto-discovery in request folder
+"""
+    request_path = repo_root / "requests" / "object-access" / "dev" / "RITM999005.yaml"
+    request_path.write_text(request_yaml, encoding="utf-8")
+
+    template_csv = """Object Type,Activity,Catalog Name,Schema Name,Object Name,Folder Path,Privileges
+catalog,ADD,finance_catalog,,,,USE_CATALOG
+"""
+    (request_path.parent / "ActualTemplate.csv").write_text(template_csv, encoding="utf-8")
+
+    output_dir = repo_root / "generated"
+
+    result = run_process_request(
+        repo_root=repo_root,
+        request_file=request_path,
+        config_file=repo_root / "uda" / "config" / "environments.yaml",
+        output_dir=output_dir,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    metadata = json.loads((output_dir / "request_metadata.json").read_text(encoding="utf-8"))
+    assert metadata["request_id"] == "RITM999005"
+
+
 def test_mixed_row_activity_fails(tmp_path: Path):
     repo_root = tmp_path
 
