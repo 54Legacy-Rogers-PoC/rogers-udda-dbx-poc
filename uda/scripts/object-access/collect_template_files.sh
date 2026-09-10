@@ -67,15 +67,15 @@ resolve_template_path() {
 }
 
 if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-  request_files_raw="${REQUEST_FILES_INPUT:-}"
-  single_request="${REQUEST_FILE_INPUT:-}"
+  request_files_raw="${REQUEST_FILES_INPUT:-${TEMPLATE_FILES_INPUT:-}}"
+  single_request="${REQUEST_FILE_INPUT:-${TEMPLATE_FILE_INPUT:-}}"
 
   if [[ -n "$request_files_raw" ]]; then
     mapfile -t requested_requests < <(printf '%s\n' "$request_files_raw" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | awk '!seen[$0]++')
   elif [[ -n "$single_request" ]]; then
     requested_requests=("$single_request")
   else
-    echo "workflow_dispatch requires request_file or request_files input." >&2
+    echo "workflow_dispatch requires request_file/request_files or template_file/template_files input." >&2
     exit 1
   fi
 
@@ -86,10 +86,16 @@ if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
 
   valid_templates=()
   for r in "${requested_requests[@]}"; do
+    if [[ -f "$r" ]] && is_excel "$r"; then
+      valid_templates+=("$r")
+      continue
+    fi
+
     if [[ ! -f "$r" ]]; then
-      echo "Requested request file not found: $r" >&2
+      echo "Requested file not found: $r" >&2
       exit 1
     fi
+
     if ! is_request_yaml "$r"; then
       echo "Unsupported request path (expected requests/object-access/<env>/*.yml|*.yaml): $r" >&2
       exit 1

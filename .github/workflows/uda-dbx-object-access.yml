@@ -67,6 +67,8 @@ jobs:
         id: collect
         shell: bash
         env:
+          REQUEST_FILE_INPUT: ${{ inputs.template_file }}
+          REQUEST_FILES_INPUT: ${{ inputs.template_files }}
           TEMPLATE_FILE_INPUT: ${{ inputs.template_file }}
           TEMPLATE_FILES_INPUT: ${{ inputs.template_files }}
           BASE_SHA_EVENT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
@@ -94,16 +96,98 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Setup Databricks Terraform environment
-        uses: ./.github/workflows/setup-dbxtf-env
+      - name: Azure login
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
         with:
-          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
-          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
-          tfstate_key_suffix: object-access
-          terraform_working_directory: ${{ env.TERRAFORM_WORKING_DIR }}
+          creds: |
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
+
+      - name: Load Databricks and Terraform backend secrets from Key Vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          KV="${{ secrets.KEYVAULT_NAME }}"
+
+          get_kv_secret() {
+            local out_var="$1"
+            shift
+            local candidate value
+            for candidate in "$@"; do
+              value="$(az keyvault secret show --vault-name "$KV" --name "$candidate" --query value -o tsv 2>/dev/null || true)"
+              if [ -n "$value" ]; then
+                printf -v "$out_var" '%s' "$value"
+                return 0
+              fi
+            done
+            echo "ERROR: Secret not found for $out_var. Tried: $*" >&2
+            return 1
+          }
+
+          get_kv_secret_fallback() {
+            local out_var="$1"
+            shift
+            local candidate value
+            for candidate in "$@"; do
+              value="$(az keyvault secret show --vault-name "$KV" --name "$candidate" --query value -o tsv 2>/dev/null || true)"
+              if [ -n "$value" ]; then
+                printf -v "$out_var" '%s' "$value"
+                return 0
+              fi
+            done
+            echo "ERROR: Secret not found for $out_var. Tried: $*" >&2
+            return 1
+          }
+
+          DBX_HOST="$(get_kv_secret DBX_HOST DATABRICKS-HOST DATABRICKS_HOST)"
+          DBX_CLIENT_ID="$(get_kv_secret_fallback DBX_CLIENT_ID DATABRICKS-CLIENT-ID DB-CLIENT-ID DATABRICKS_CLIENT_ID)"
+          DBX_CLIENT_SECRET="$(get_kv_secret_fallback DBX_CLIENT_SECRET DATABRICKS-CLIENT-SECRET DB-CLIENT-SECRET DATABRICKS_CLIENT_SECRET)"
+          DBX_TENANT_ID="$(get_kv_secret_fallback DBX_TENANT_ID DATABRICKS-TENANT-ID DB-TENANT-ID DATABRICKS_TENANT_ID)"
+          DBX_WORKSPACE_RESOURCE_ID="$(get_kv_secret_fallback DBX_WORKSPACE_RESOURCE_ID DATABRICKS-WORKSPACE-RESOURCE-ID DATABRICKS_WORKSPACE_RESOURCE_ID || true)"
+
+          TFSTATE_RESOURCE_GROUP="$(get_kv_secret TFSTATE_RESOURCE_GROUP TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)"
+          TFSTATE_STORAGE_ACCOUNT="$(get_kv_secret TFSTATE_STORAGE_ACCOUNT TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)"
+          TFSTATE_CONTAINER="$(get_kv_secret TFSTATE_CONTAINER TFSTATE-CONTAINER-DBX-UDA)"
+          TFSTATE_KEY_BASE="$(get_kv_secret TFSTATE_KEY_BASE TFSTATE-KEY-DBX TFSTATE_KEY_DBX)"
+          TFSTATE_ACCESS_KEY="$(get_kv_secret_fallback TFSTATE_ACCESS_KEY TFSTATE-ACCESS-KEY TFSTATE_STORAGE_ACCESS_KEY TFSTATE_ACCESS_KEY || true)"
+
+          if [ -n "$DBX_WORKSPACE_RESOURCE_ID" ]; then
+            echo "TF_VAR_databricks_workspace_resource_id=$DBX_WORKSPACE_RESOURCE_ID" >> "$GITHUB_ENV"
+          fi
+
+          if [ -z "$TFSTATE_ACCESS_KEY" ]; then
+            echo "TFSTATE_ACCESS_KEY is empty; backend auth will rely on Azure AD auth instead." >&2
+          fi
+
+          if [[ "$TFSTATE_KEY_BASE" == *.tfstate ]]; then
+            TFSTATE_KEY="${TFSTATE_KEY_BASE%.tfstate}-object-access.tfstate"
+          else
+            TFSTATE_KEY="${TFSTATE_KEY_BASE}-object-access"
+          fi
+
+          echo "::add-mask::$DBX_CLIENT_SECRET" 
+          echo "::add-mask::$TFSTATE_ACCESS_KEY" 
+
+          echo "TF_VAR_databricks_host=${DBX_HOST}" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=${DBX_CLIENT_ID}" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=${DBX_CLIENT_SECRET}" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_tenant_id=${DBX_TENANT_ID}" >> "$GITHUB_ENV"
+
+          echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RESOURCE_GROUP" >> "$GITHUB_ENV"
+          echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_STORAGE_ACCOUNT" >> "$GITHUB_ENV"
+          echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
+          echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
+          echo "TFSTATE_ACCESS_KEY=$TFSTATE_ACCESS_KEY" >> "$GITHUB_ENV"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -442,35 +526,3 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Send completion notification
-        id: notify
-        if: always()
-        uses: ./.github/workflows/send-dl-notification
-        with:
-          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
-          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
-          subject: ${{ format('UDA Databricks Object Access Completed - {0}', env.REQUEST_ID) }}
-          body: |
-            UDA Databricks Object Access workflow completed.
-
-            Template file: ${{ env.TEMPLATE_FILE }}
-            Request activity: ${{ env.REQUEST_ACTIVITY }}
-            Output dir: ${{ env.OUTPUT_DIR }}
-            Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-      - name: Add notification status to summary
-        if: always()
-        run: |
-          if [ "${{ steps.notify.outputs.status }}" = "sent" ]; then
-            echo "- Notification DL Email: sent from Key Vault to configured distribution list" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- Notification DL Email: skipped (missing Key Vault notification secrets)" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Archive execution log
-        uses: actions/upload-artifact@v4
-        with:
-          name: uda-execution-log
-          path: generated/execution_log.json
