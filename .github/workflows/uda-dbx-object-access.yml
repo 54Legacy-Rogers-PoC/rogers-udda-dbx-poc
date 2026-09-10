@@ -14,6 +14,15 @@ on:
       - "requests/object-access/**"
   workflow_dispatch:
     inputs:
+      environment:
+        description: Target environment to process (dev, qa, prod)
+        required: false
+        default: dev
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
       template_file:
         description: Path to a single Excel template file
         required: true
@@ -69,11 +78,14 @@ jobs:
     needs: [detect-templates]
     if: ${{ needs.detect-templates.outputs.has_templates == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
     runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || github.ref_name == 'main' && 'prod' || github.ref_name == 'qa' && 'qa' || 'dev' }}
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
     env:
+      TARGET_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || github.ref_name == 'main' && 'prod' || github.ref_name == 'qa' && 'qa' || 'dev' }}
+      TERRAFORM_WORKING_DIR: ${{ format('terraform/environments/{0}', github.event_name == 'workflow_dispatch' && inputs.environment || github.ref_name == 'main' && 'prod' || github.ref_name == 'qa' && 'qa' || 'dev') }}
       TEMPLATE_FILE: ${{ matrix.template_file }}
       OUTPUT_ROOT: uda/output/object-access
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -91,6 +103,7 @@ jobs:
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
           tfstate_key_suffix: object-access
+          terraform_working_directory: ${{ env.TERRAFORM_WORKING_DIR }}
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -162,9 +175,24 @@ jobs:
             python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_import_tfvars.py"
           )
 
+      - name: Terraform clean init
+        shell: bash
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+        run: |
+          set -euo pipefail
+          rm -rf .terraform
+          terraform init -reconfigure \
+            -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+            -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+            -backend-config="container_name=$TFSTATE_CONTAINER" \
+            -backend-config="key=$TFSTATE_KEY" \
+            -backend-config="access_key=$TFSTATE_ACCESS_KEY"
+          terraform providers
+          terraform validate
+
       - name: Terraform plan
         shell: bash
-        working-directory: terraform/environments/dev
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
           if [ "$REQUEST_ACTIVITY" != "ADD" ]; then
             declare -a TARGETS=()
@@ -268,9 +296,9 @@ jobs:
           fi
 
       - name: Terraform apply
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply }}
         shell: bash
-        working-directory: terraform/environments/dev
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
           set -euo pipefail
 
@@ -417,7 +445,7 @@ jobs:
           azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
-          subject: "UDA Databricks Object Access Completed - ${REQUEST_ID}"
+          subject: ${{ format('UDA Databricks Object Access Completed - {0}', env.REQUEST_ID) }}
           body: |
             UDA Databricks Object Access workflow completed.
 
