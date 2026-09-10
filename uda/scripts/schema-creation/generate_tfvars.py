@@ -19,7 +19,6 @@ REQUIRED_KEYS = {
 
 # Keep this list aligned with the future schema-creation Terraform root variables.
 DECLARED_TFVARS_KEYS = [
-    "schema_creation_enabled",
     "request_id",
     "environment",
     "sandbox_mode",
@@ -99,9 +98,6 @@ def build_tfvars_payload(normalized_payload: dict[str, Any]) -> dict[str, Any]:
     tfvars_payload: dict[str, Any] = {}
 
     for key in DECLARED_TFVARS_KEYS:
-        if key == "schema_creation_enabled":
-            tfvars_payload[key] = True
-            continue
         value = normalized_payload.get(key)
         if key in {"create_communitymart_schema", "governance_approval_required", "ad_approval_required"}:
             tfvars_payload[key] = _to_bool(value)
@@ -117,7 +113,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-json", required=True, help="Output tfvars JSON path")
     parser.add_argument(
         "--terraform-variables-file",
-        default="terraform/environments/dev/variables.tf",
+        default="terraform/variables.tf",
         help="Path to Terraform variables.tf used to validate tfvars contract",
     )
     return parser.parse_args()

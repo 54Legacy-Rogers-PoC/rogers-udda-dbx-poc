@@ -3,26 +3,18 @@ name: UDA Databricks Object Access
 on:
   push:
     branches:
-      - main
       - feature/furqan-udda
     paths:
       - "requests/object-access/**"
+      - "uda/attachments/object-access/**"
   pull_request:
     branches:
       - feature/furqan-udda
     paths:
       - "requests/object-access/**"
+      - "uda/attachments/object-access/**"
   workflow_dispatch:
     inputs:
-      environment:
-        description: Target environment to process (dev, qa, prod)
-        required: false
-        default: dev
-        type: choice
-        options:
-          - dev
-          - qa
-          - prod
       template_file:
         description: Path to a single Excel template file
         required: true
@@ -67,8 +59,6 @@ jobs:
         id: collect
         shell: bash
         env:
-          REQUEST_FILE_INPUT: ${{ inputs.template_file }}
-          REQUEST_FILES_INPUT: ${{ inputs.template_files }}
           TEMPLATE_FILE_INPUT: ${{ inputs.template_file }}
           TEMPLATE_FILES_INPUT: ${{ inputs.template_files }}
           BASE_SHA_EVENT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
@@ -80,14 +70,11 @@ jobs:
     needs: [detect-templates]
     if: ${{ needs.detect-templates.outputs.has_templates == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
     env:
-      TARGET_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
-      TERRAFORM_WORKING_DIR: ${{ format('terraform/environments/{0}', github.event_name == 'workflow_dispatch' && inputs.environment || 'dev') }}
       TEMPLATE_FILE: ${{ matrix.template_file }}
       OUTPUT_ROOT: uda/output/object-access
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -107,87 +94,75 @@ jobs:
               "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
             }
 
-      - name: Load Databricks and Terraform backend secrets from Key Vault
+      - name: Load Databricks secrets from Key Vault
         shell: bash
         run: |
-          set -euo pipefail
           KV="${{ secrets.KEYVAULT_NAME }}"
 
           get_kv_secret() {
             local out_var="$1"
-            shift
-            local candidate value
-            for candidate in "$@"; do
-              value="$(az keyvault secret show --vault-name "$KV" --name "$candidate" --query value -o tsv 2>/dev/null || true)"
-              if [ -n "$value" ]; then
-                printf -v "$out_var" '%s' "$value"
-                return 0
-              fi
-            done
-            echo "ERROR: Secret not found for $out_var. Tried: $*" >&2
-            return 1
+            local secret_name="$2"
+            local value
+            value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
+            if [ -z "$value" ]; then
+              echo "Missing Key Vault secret: $secret_name" >&2
+              exit 1
+            fi
+            printf -v "$out_var" '%s' "$value"
           }
 
           get_kv_secret_fallback() {
             local out_var="$1"
             shift
-            local candidate value
-            for candidate in "$@"; do
-              value="$(az keyvault secret show --vault-name "$KV" --name "$candidate" --query value -o tsv 2>/dev/null || true)"
+            local names=("$@")
+            local value=""
+            for secret_name in "${names[@]}"; do
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
               if [ -n "$value" ]; then
                 printf -v "$out_var" '%s' "$value"
                 return 0
               fi
             done
-            echo "ERROR: Secret not found for $out_var. Tried: $*" >&2
-            return 1
+            echo "Missing Key Vault secret. Tried names: ${names[*]}" >&2
+            exit 1
           }
 
-          DBX_HOST="$(get_kv_secret DBX_HOST DATABRICKS-HOST DATABRICKS_HOST)"
-          DBX_CLIENT_ID="$(get_kv_secret_fallback DBX_CLIENT_ID DATABRICKS-CLIENT-ID DB-CLIENT-ID DATABRICKS_CLIENT_ID)"
-          DBX_CLIENT_SECRET="$(get_kv_secret_fallback DBX_CLIENT_SECRET DATABRICKS-CLIENT-SECRET DB-CLIENT-SECRET DATABRICKS_CLIENT_SECRET)"
-          DBX_TENANT_ID="$(get_kv_secret_fallback DBX_TENANT_ID DATABRICKS-TENANT-ID DB-TENANT-ID DATABRICKS_TENANT_ID)"
-          DBX_WORKSPACE_RESOURCE_ID="$(get_kv_secret_fallback DBX_WORKSPACE_RESOURCE_ID DATABRICKS-WORKSPACE-RESOURCE-ID DATABRICKS_WORKSPACE_RESOURCE_ID || true)"
+          get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST
+          DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
+          get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID
+          get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET
+          get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID
+          get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP
+          get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT
+          get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA
+          get_kv_secret_fallback TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
+          TFSTATE_KEY_EFFECTIVE="addremove.tfstate"
 
-          TFSTATE_RESOURCE_GROUP="$(get_kv_secret TFSTATE_RESOURCE_GROUP TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)"
-          TFSTATE_STORAGE_ACCOUNT="$(get_kv_secret TFSTATE_STORAGE_ACCOUNT TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)"
-          TFSTATE_CONTAINER="$(get_kv_secret TFSTATE_CONTAINER TFSTATE-CONTAINER-DBX-UDA)"
-          TFSTATE_KEY_BASE="$(get_kv_secret TFSTATE_KEY_BASE TFSTATE-KEY-DBX TFSTATE_KEY_DBX)"
-          TFSTATE_ACCESS_KEY="$(get_kv_secret_fallback TFSTATE_ACCESS_KEY TFSTATE-ACCESS-KEY TFSTATE_STORAGE_ACCESS_KEY TFSTATE_ACCESS_KEY || true)"
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
+            if [ -z "${!v}" ]; then
+              echo "Missing or empty secret value for $v from Key Vault $KV" >&2
+              exit 1
+            fi
+          done
 
-          if [ -n "$DBX_WORKSPACE_RESOURCE_ID" ]; then
-            echo "TF_VAR_databricks_workspace_resource_id=$DBX_WORKSPACE_RESOURCE_ID" >> "$GITHUB_ENV"
-          fi
+          echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
+          echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
 
-          if [ -z "$TFSTATE_ACCESS_KEY" ]; then
-            echo "TFSTATE_ACCESS_KEY is empty; backend auth will rely on Azure AD auth instead." >&2
-          fi
+          echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
-          if [[ "$TFSTATE_KEY_BASE" == *.tfstate ]]; then
-            TFSTATE_KEY="${TFSTATE_KEY_BASE%.tfstate}-object-access.tfstate"
-          else
-            TFSTATE_KEY="${TFSTATE_KEY_BASE}-object-access"
-          fi
+          echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_KEY=$TFSTATE_KEY_EFFECTIVE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE" >> "$GITHUB_ENV"
 
-          echo "::add-mask::$DBX_CLIENT_SECRET" 
-          echo "::add-mask::$TFSTATE_ACCESS_KEY" 
+          echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
 
-          echo "TF_VAR_databricks_host=${DBX_HOST}" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_id=${DBX_CLIENT_ID}" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_client_secret=${DBX_CLIENT_SECRET}" >> "$GITHUB_ENV"
-          echo "TF_VAR_databricks_tenant_id=${DBX_TENANT_ID}" >> "$GITHUB_ENV"
-
-          echo "TFSTATE_RESOURCE_GROUP=$TFSTATE_RESOURCE_GROUP" >> "$GITHUB_ENV"
-          echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_STORAGE_ACCOUNT" >> "$GITHUB_ENV"
-          echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
-          echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
-          echo "TFSTATE_ACCESS_KEY=$TFSTATE_ACCESS_KEY" >> "$GITHUB_ENV"
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
-        with:
-          terraform_version: 1.9.8
-          terraform_wrapper: false
+          echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -195,6 +170,13 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: uda/scripts/object-access/requirements-ci.txt
+
+      - name: Set up Terraform
+        id: setup_terraform_plan
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
 
       - name: Install workflow dependencies
         run: |
@@ -259,30 +241,34 @@ jobs:
             python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_import_tfvars.py"
           )
 
-      - name: Terraform clean init
+      - name: Terraform init (with retry)
         shell: bash
-        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
-          set -euo pipefail
-          if [ ! -d "$GITHUB_WORKSPACE/${TERRAFORM_WORKING_DIR}" ]; then
-            echo "Terraform directory not found: ${TERRAFORM_WORKING_DIR}" >&2
-            echo "Supported environments in this repo: dev" >&2
+          if [ -z "${TF_BACKEND_ACCESS_KEY:-}" ]; then
+            echo "TF_BACKEND_ACCESS_KEY is empty; cannot initialize Terraform backend." >&2
             exit 1
           fi
 
-          rm -rf .terraform
-          terraform init -reconfigure \
-            -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
-            -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
-            -backend-config="container_name=$TFSTATE_CONTAINER" \
-            -backend-config="key=$TFSTATE_KEY" \
-            -backend-config="access_key=$TFSTATE_ACCESS_KEY"
-          terraform providers
-          terraform validate
+          for attempt in 1 2 3; do
+            echo "Terraform init attempt $attempt/3"
+            if terraform -chdir=terraform init \
+              -backend-config="resource_group_name=$TF_BACKEND_RESOURCE_GROUP_NAME" \
+              -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
+              -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
+              -backend-config="key=$TF_BACKEND_KEY" \
+              -backend-config="use_azuread_auth=false" \
+              -backend-config="access_key=$TF_BACKEND_ACCESS_KEY"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep 15
+            fi
+          done
+          echo "terraform init failed after 3 attempts" >&2
+          exit 1
 
       - name: Terraform plan
         shell: bash
-        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
           if [ "$REQUEST_ACTIVITY" != "ADD" ]; then
             declare -a TARGETS=()
@@ -358,37 +344,36 @@ jobs:
                 echo "true" > "$OUTPUT_DIR/remove-phase-skipped.flag"
               fi
             else
-              terraform plan \
+              terraform -chdir=terraform plan \
                 -lock-timeout=10m \
                 -destroy \
                 -var-file="../$TFVARS_JSON" \
                 "${target_args[@]}" \
                 -out="../$TFPLAN_BIN"
 
-              terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
+              terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
             fi
           else
-            terraform plan \
+            terraform -chdir=terraform plan \
               -lock-timeout=10m \
               -var-file="../$TFVARS_JSON" \
               -out="../$TFPLAN_BIN"
 
-            terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
+            terraform -chdir=terraform show -no-color "../$TFPLAN_BIN" > "$TFPLAN_TXT"
           fi
 
           if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
             echo "Generating ADD phase plan for MIXED activity template..."
-            terraform plan \
+            terraform -chdir=terraform plan \
               -lock-timeout=10m \
               -var-file="../$TFVARS_JSON" \
               -out="../$TFPLAN_MIXED_ADD_BIN"
-            terraform show -no-color "../$TFPLAN_MIXED_ADD_BIN" > "$TFPLAN_MIXED_ADD_TXT"
+            terraform -chdir=terraform show -no-color "../$TFPLAN_MIXED_ADD_BIN" > "$TFPLAN_MIXED_ADD_TXT"
           fi
 
       - name: Terraform apply
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         shell: bash
-        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
           set -euo pipefail
 
@@ -436,7 +421,7 @@ jobs:
                 exit 1
               fi
 
-              mapfile -t STATE_ADDRS < <(terraform state list || true)
+              mapfile -t STATE_ADDRS < <(terraform -chdir=terraform state list || true)
 
               target_args=()
               missing_targets=()
@@ -445,7 +430,7 @@ jobs:
                   import_id="${TARGET_IMPORT_ID[$t]:-}"
                   if [ -n "$import_id" ]; then
                     echo "Target not in state. Attempting import for revoke: $import_id"
-                    if terraform import -var-file="../$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
+                    if terraform -chdir=terraform import -var-file="../$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
                       echo "Imported missing target into state: $t"
                       target_args+=("-target=$t")
                       continue
@@ -473,35 +458,35 @@ jobs:
 
                 echo "No REMOVE targets available for MIXED template. Skipping REMOVE phase and continuing to ADD phase."
               else
-                terraform plan \
+                terraform -chdir=terraform plan \
                   -lock-timeout=10m \
                   -destroy \
                   -var-file="../$TFVARS_JSON" \
                   "${target_args[@]}" \
                   -out="../$TFPLAN_BIN"
-                terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+                terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
 
                 if [ "$REQUEST_ACTIVITY" != "MIXED" ]; then
                   exit 0
                 fi
               fi
             else
-              terraform plan \
+              terraform -chdir=terraform plan \
                 -lock-timeout=10m \
                 -var-file="../$TFVARS_JSON" \
                 -out="../$TFPLAN_BIN"
-              terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
+              terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_BIN"
               exit 0
             fi
           fi
 
           if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
             echo "Starting ADD phase for MIXED activity template..."
-            terraform plan \
+            terraform -chdir=terraform plan \
               -lock-timeout=10m \
               -var-file="../$TFVARS_JSON" \
               -out="../$TFPLAN_MIXED_ADD_BIN"
-            terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_MIXED_ADD_BIN"
+            terraform -chdir=terraform apply -lock-timeout=10m -auto-approve "../$TFPLAN_MIXED_ADD_BIN"
           fi
 
       - name: Publish plan outputs
@@ -525,4 +510,3 @@ jobs:
               echo "- Add plan text: $TFPLAN_MIXED_ADD_TXT"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-
