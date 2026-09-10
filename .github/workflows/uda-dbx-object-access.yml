@@ -3,6 +3,7 @@ name: UDA Databricks Object Access
 on:
   push:
     branches:
+      - main
       - feature/furqan-udda
     paths:
       - "requests/object-access/**"
