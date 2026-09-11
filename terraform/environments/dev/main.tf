@@ -19,16 +19,16 @@ locals {
         lower(r.folder_path != null && r.folder_path != "" ? r.folder_path : ""),
         upper(r.privilege != null && r.privilege != "" ? r.privilege : "")
       ])
-      activity       = upper(try(r.activity, ""))
-      object_type    = lower(try(r.object_type, ""))
-      principal_type = try(r.principal_type, r.access_for)
-      principal_name = try(r.principal_name, "")
-      catalog_name   = try(r.catalog_name, r.catalog)
-      schema_name    = try(r.schema_name, r.schema)
-      object_name    = try(r.object_name, "")
-      folder_path    = try(r.folder_path, "")
-      privileges     = try(r.privileges, [r.privilege])
-      justification  = try(r.justification, "")
+      activity = upper(try(r.activity, ""))
+      object_type = lower(try(r.object_type, ""))
+      principal_type = r.principal_type != null && r.principal_type != "" ? r.principal_type : (r.access_for != null && r.access_for != "" ? r.access_for : "")
+      principal_name = r.principal_name != null ? r.principal_name : ""
+      catalog_name = r.catalog_name != null && r.catalog_name != "" ? r.catalog_name : (r.catalog != null && r.catalog != "" ? r.catalog : "")
+      schema_name = r.schema_name != null && r.schema_name != "" ? r.schema_name : (r.schema != null && r.schema != "" ? r.schema : "")
+      object_name = r.object_name != null ? r.object_name : ""
+      folder_path = r.folder_path != null ? r.folder_path : ""
+      privileges = r.privileges != null ? r.privileges : (r.privilege != null && r.privilege != "" ? [r.privilege] : [])
+      justification = r.justification != null ? r.justification : ""
     }
   ]
 
