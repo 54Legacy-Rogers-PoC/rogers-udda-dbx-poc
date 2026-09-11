@@ -15,6 +15,7 @@ variable "object_access_records" {
   type = list(object({
     record_id              = optional(string)
     row_id                 = optional(string)
+    resource_key           = optional(string)
     activity               = string
     environment            = optional(string)
     access_for             = optional(string)

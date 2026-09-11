@@ -8,6 +8,17 @@ locals {
         try(r.record_id, "") != "" ? r.record_id :
         tostring(try(r.row_number, 0))
       )
+      resource_key = join("|", [
+        upper(try(r.environment, "")),
+        lower(try(r.access_for, try(r.principal_type, ""))),
+        lower(try(r.principal_name, "")),
+        lower(try(r.object_type, "")),
+        lower(try(r.catalog_name, try(r.catalog, ""))),
+        lower(try(r.schema_name, try(r.schema, ""))),
+        lower(try(r.object_name, "")),
+        lower(try(r.folder_path, "")),
+        upper(try(r.privilege, ""))
+      ])
       activity       = upper(try(r.activity, ""))
       object_type    = lower(try(r.object_type, ""))
       principal_type = try(r.principal_type, r.access_for)
@@ -22,23 +33,23 @@ locals {
   ]
 
   catalog_records = {
-    for r in local.normalized_records : r.row_id => r
-    if r.row_id != null && r.row_id != "" && r.object_type == "catalog"
+    for r in local.normalized_records : r.resource_key => r
+    if r.resource_key != "" && r.object_type == "catalog"
   }
 
   schema_records = {
-    for r in local.normalized_records : r.row_id => r
-    if r.row_id != null && r.row_id != "" && r.object_type == "schema"
+    for r in local.normalized_records : r.resource_key => r
+    if r.resource_key != "" && r.object_type == "schema"
   }
 
   view_records = {
-    for r in local.normalized_records : r.row_id => r
-    if r.row_id != null && r.row_id != "" && r.object_type == "view"
+    for r in local.normalized_records : r.resource_key => r
+    if r.resource_key != "" && r.object_type == "view"
   }
 
   folder_records = {
-    for r in local.normalized_records : r.row_id => r
-    if r.row_id != null && r.row_id != "" && r.object_type == "folder"
+    for r in local.normalized_records : r.resource_key => r
+    if r.resource_key != "" && r.object_type == "folder"
   }
 
   service_account_cluster_access_records = {

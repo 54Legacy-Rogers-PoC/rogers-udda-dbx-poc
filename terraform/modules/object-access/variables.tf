@@ -1,8 +1,9 @@
 # Each input map is already normalized and filtered by the root module.
 variable "catalog_records" {
-  description = "Normalized catalog-level access records keyed by row id"
+  description = "Normalized catalog-level access records keyed by stable resource identity"
   type = map(object({
     row_id         = string
+    resource_key   = string
     activity       = string
     object_type    = string
     principal_type = string
@@ -17,9 +18,10 @@ variable "catalog_records" {
 }
 
 variable "schema_records" {
-  description = "Normalized schema-level access records keyed by row id"
+  description = "Normalized schema-level access records keyed by stable resource identity"
   type = map(object({
     row_id         = string
+    resource_key   = string
     activity       = string
     object_type    = string
     principal_type = string
@@ -34,9 +36,10 @@ variable "schema_records" {
 }
 
 variable "view_records" {
-  description = "Normalized view-level access records keyed by row id"
+  description = "Normalized view-level access records keyed by stable resource identity"
   type = map(object({
     row_id         = string
+    resource_key   = string
     activity       = string
     object_type    = string
     principal_type = string
@@ -51,9 +54,10 @@ variable "view_records" {
 }
 
 variable "folder_records" {
-  description = "Normalized folder-level access records keyed by row id"
+  description = "Normalized folder-level access records keyed by stable resource identity"
   type = map(object({
     row_id         = string
+    resource_key   = string
     activity       = string
     object_type    = string
     principal_type = string
