@@ -274,49 +274,17 @@ jobs:
             declare -a TARGETS=()
             declare -A TARGET_IMPORT_ID=()
 
+            python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_revoke_targets.py" \
+              --input-json "$TFVARS_JSON" \
+              --output-tsv "$OUTPUT_DIR/revoke_targets.tsv"
+
             while IFS=$'\t' read -r target import_id; do
               if [ -z "$target" ] || [ -z "$import_id" ]; then
                 continue
               fi
               TARGETS+=("$target")
               TARGET_IMPORT_ID["$target"]="$import_id"
-            done < <(python - "$TFVARS_JSON" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, 'r', encoding='utf-8') as fh:
-    payload = json.load(fh)
-
-for rec in payload.get('object_access_records', []):
-    if str(rec.get('activity', '')).strip().upper() != 'REMOVE':
-        continue
-
-    obj_type = str(rec.get('object_type', '')).strip().lower()
-    env = str(rec.get('environment', '') or '').strip().upper()
-    access_for = str(rec.get('access_for') or rec.get('principal_type') or '').strip().lower()
-    principal_name = str(rec.get('principal_name') or '').strip()
-    principal_key = principal_name.lower()
-    catalog = str(rec.get('catalog_name') or rec.get('catalog') or '').strip().lower()
-    schema = str(rec.get('schema_name') or rec.get('schema') or '').strip().lower()
-    object_name = str(rec.get('object_name') or '').strip().lower()
-    privilege = str(rec.get('privilege') or '').strip().upper()
-
-    if obj_type == 'catalog':
-        target = f'module.object_access.databricks_grant.catalog_add["{env}|{access_for}|{principal_key}|catalog|{catalog}|{privilege}"]'
-        import_id = f'catalog/{catalog}/{principal_name}'
-    elif obj_type == 'schema':
-        target = f'module.object_access.databricks_grant.schema_add["{env}|{access_for}|{principal_key}|schema|{catalog}|{schema}|{privilege}"]'
-        import_id = f'schema/{catalog}.{schema}/{principal_name}'
-    elif obj_type == 'view':
-        target = f'module.object_access.databricks_grant.view_add["{env}|{access_for}|{principal_key}|view|{catalog}|{schema}|{object_name}|{privilege}"]'
-        import_id = f'table/{catalog}.{schema}.{object_name}/{principal_name}'
-    else:
-        continue
-
-    print(f'{target}\t{import_id}')
-PY
-)
+            done < "$OUTPUT_DIR/revoke_targets.tsv"
 
             if [ "${#TARGETS[@]}" -eq 0 ]; then
               echo "No revoke targets found for REMOVE/REVOKE template." >&2
@@ -408,49 +376,17 @@ PY
               declare -a TARGETS=()
               declare -A TARGET_IMPORT_ID=()
 
+              python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_revoke_targets.py" \
+                --input-json "$TFVARS_JSON" \
+                --output-tsv "$OUTPUT_DIR/revoke_targets.tsv"
+
               while IFS=$'\t' read -r target import_id; do
                 if [ -z "$target" ] || [ -z "$import_id" ]; then
                   continue
                 fi
                 TARGETS+=("$target")
                 TARGET_IMPORT_ID["$target"]="$import_id"
-              done < <(python - "$TFVARS_JSON" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, 'r', encoding='utf-8') as fh:
-    payload = json.load(fh)
-
-for rec in payload.get('object_access_records', []):
-    if str(rec.get('activity', '')).strip().upper() != 'REMOVE':
-        continue
-
-    obj_type = str(rec.get('object_type', '')).strip().lower()
-    env = str(rec.get('environment', '') or '').strip().upper()
-    access_for = str(rec.get('access_for') or rec.get('principal_type') or '').strip().lower()
-    principal_name = str(rec.get('principal_name') or '').strip()
-    principal_key = principal_name.lower()
-    catalog = str(rec.get('catalog_name') or rec.get('catalog') or '').strip().lower()
-    schema = str(rec.get('schema_name') or rec.get('schema') or '').strip().lower()
-    object_name = str(rec.get('object_name') or '').strip().lower()
-    privilege = str(rec.get('privilege') or '').strip().upper()
-
-    if obj_type == 'catalog':
-        target = f'module.object_access.databricks_grant.catalog_add["{env}|{access_for}|{principal_key}|catalog|{catalog}|{privilege}"]'
-        import_id = f'catalog/{catalog}/{principal_name}'
-    elif obj_type == 'schema':
-        target = f'module.object_access.databricks_grant.schema_add["{env}|{access_for}|{principal_key}|schema|{catalog}|{schema}|{privilege}"]'
-        import_id = f'schema/{catalog}.{schema}/{principal_name}'
-    elif obj_type == 'view':
-        target = f'module.object_access.databricks_grant.view_add["{env}|{access_for}|{principal_key}|view|{catalog}|{schema}|{object_name}|{privilege}"]'
-        import_id = f'table/{catalog}.{schema}.{object_name}/{principal_name}'
-    else:
-        continue
-
-    print(f'{target}\t{import_id}')
-PY
-)
+              done < "$OUTPUT_DIR/revoke_targets.tsv"
 
               if [ "${#TARGETS[@]}" -eq 0 ]; then
                 echo "No revoke targets found for REMOVE/REVOKE template." >&2
