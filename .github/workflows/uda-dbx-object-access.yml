@@ -338,8 +338,8 @@ jobs:
 
             if [ "${#target_args[@]}" -eq 0 ]; then
               if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
-                echo "REMOVE request failed: none of the requested revoke targets were present in state and import did not succeed." >&2
-                exit 1
+                echo "REMOVE phase skipped: none of the requested revoke targets were present in state and import did not succeed for the current config."
+                echo "true" > "$OUTPUT_DIR/remove-phase-skipped.flag"
               else
                 echo "No REMOVE targets available for MIXED template. Skipping REMOVE phase and continuing to ADD plan."
                 echo "true" > "$OUTPUT_DIR/remove-phase-skipped.flag"
@@ -453,11 +453,11 @@ jobs:
 
               if [ "${#target_args[@]}" -eq 0 ]; then
                 if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
-                  echo "REMOVE request failed: none of the requested revoke targets were present in state and import did not succeed." >&2
-                  exit 1
+                  echo "REMOVE phase skipped: none of the requested revoke targets were present in state and import did not succeed for the current config."
+                  echo "true" > "$OUTPUT_DIR/remove-phase-skipped.flag"
+                else
+                  echo "No REMOVE targets available for MIXED template. Skipping REMOVE phase and continuing to ADD phase."
                 fi
-
-                echo "No REMOVE targets available for MIXED template. Skipping REMOVE phase and continuing to ADD phase."
               else
                 terraform -chdir="$TF_WORKDIR" plan \
                   -lock-timeout=10m \
