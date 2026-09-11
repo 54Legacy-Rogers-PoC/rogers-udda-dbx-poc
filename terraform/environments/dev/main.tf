@@ -23,22 +23,22 @@ locals {
 
   catalog_records = {
     for r in local.normalized_records : r.row_id => r
-    if r.object_type == "catalog"
+    if r.row_id != null && r.row_id != "" && r.object_type == "catalog"
   }
 
   schema_records = {
     for r in local.normalized_records : r.row_id => r
-    if r.object_type == "schema"
+    if r.row_id != null && r.row_id != "" && r.object_type == "schema"
   }
 
   view_records = {
     for r in local.normalized_records : r.row_id => r
-    if r.object_type == "view"
+    if r.row_id != null && r.row_id != "" && r.object_type == "view"
   }
 
   folder_records = {
     for r in local.normalized_records : r.row_id => r
-    if r.object_type == "folder"
+    if r.row_id != null && r.row_id != "" && r.object_type == "folder"
   }
 
   service_account_cluster_access_records = {
