@@ -194,7 +194,10 @@ jobs:
           echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
           echo "PARSED_JSON=$output_dir/parsed-object-access.json" >> "$GITHUB_ENV"
           echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "REQUEST_TFVARS_JSON=$output_dir/object-access-request.tfvars.json" >> "$GITHUB_ENV"
           echo "TFVARS_IMPORT_JSON=$output_dir/object-access-import.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "ACTIVE_GRANTS_MANIFEST=$output_dir/active-grants-manifest.json" >> "$GITHUB_ENV"
+          echo "TERRAFORM_STATE_JSON=$output_dir/terraform-state.json" >> "$GITHUB_ENV"
           echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
           echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
           echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
@@ -220,6 +223,7 @@ jobs:
           python uda/scripts/object-access/generate_tfvars.py \
             --input-json "$PARSED_JSON" \
             --output-json "$TFVARS_JSON"
+          cp "$TFVARS_JSON" "$REQUEST_TFVARS_JSON"
 
       - name: Determine request activity from parsed rows
         shell: bash
@@ -267,6 +271,36 @@ jobs:
           echo "terraform init failed after 3 attempts" >&2
           exit 1
 
+      - name: Build persistent active-grants manifest
+        shell: bash
+        run: |
+          environment_name="$(jq -r '.environment | ascii_downcase' "$REQUEST_TFVARS_JSON")"
+          manifest_blob="object-access/manifests/${environment_name}.json"
+          echo "ACTIVE_GRANTS_BLOB=$manifest_blob" >> "$GITHUB_ENV"
+
+          if ! az storage blob download \
+            --account-name "$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
+            --container-name "$TF_BACKEND_CONTAINER_NAME" \
+            --name "$manifest_blob" \
+            --file "$ACTIVE_GRANTS_MANIFEST" \
+            --account-key "$TF_BACKEND_ACCESS_KEY" \
+            --overwrite true \
+            --only-show-errors; then
+            echo '{}' > "$ACTIVE_GRANTS_MANIFEST"
+            echo "No persistent manifest found; bootstrapping from Terraform state."
+          fi
+
+          if ! terraform -chdir="$TF_WORKDIR" show -json > "$TERRAFORM_STATE_JSON"; then
+            echo '{}' > "$TERRAFORM_STATE_JSON"
+            echo "No Terraform state values available for manifest bootstrap."
+          fi
+
+          python "$GITHUB_WORKSPACE/uda/scripts/object-access/merge_active_grants.py" \
+            --request-json "$REQUEST_TFVARS_JSON" \
+            --manifest-json "$ACTIVE_GRANTS_MANIFEST" \
+            --state-json "$TERRAFORM_STATE_JSON" \
+            --output-json "$TFVARS_JSON"
+
       - name: Terraform plan
         shell: bash
         run: |
@@ -275,7 +309,7 @@ jobs:
             declare -A TARGET_IMPORT_ID=()
 
             python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_revoke_targets.py" \
-              --input-json "$TFVARS_JSON" \
+              --input-json "$REQUEST_TFVARS_JSON" \
               --output-tsv "$OUTPUT_DIR/revoke_targets.tsv"
 
             while IFS=$'\t' read -r target import_id; do
@@ -302,13 +336,7 @@ jobs:
                 if [ -n "$import_id" ]; then
                   echo "Target not in state. Attempting import for revoke: $import_id"
                   if python "$GITHUB_WORKSPACE/uda/scripts/object-access/restore_missing_import_record.py" \
-                    --input-json "$TFVARS_JSON" \
-                    --output-json "$TFVARS_JSON" \
-                    --target "$t"; then
-                    echo "Recovered config entry for stale revoke target in live tfvars: $t"
-                  fi
-                  if python "$GITHUB_WORKSPACE/uda/scripts/object-access/restore_missing_import_record.py" \
-                    --input-json "$TFVARS_JSON" \
+                    --input-json "$REQUEST_TFVARS_JSON" \
                     --output-json "$TFVARS_IMPORT_JSON" \
                     --target "$t"; then
                     echo "Recovered config entry for stale revoke target in import tfvars: $t"
@@ -372,15 +400,13 @@ jobs:
       - name: Exact-match destroy guard
         shell: bash
         run: |
-          if [ -f "$GITHUB_WORKSPACE/$TFPLAN_BIN" ]; then
+          if [ "$REQUEST_ACTIVITY" = "ADD" ] && [ -f "$GITHUB_WORKSPACE/$TFPLAN_BIN" ]; then
             terraform -chdir="$TF_WORKDIR" show -json "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$OUTPUT_DIR/terraform-plan.json"
             python "$GITHUB_WORKSPACE/uda/scripts/object-access/guard_exact_match_destroy.py" \
               --tfvars-json "$GITHUB_WORKSPACE/$TFVARS_JSON" \
-              --plan-json "$OUTPUT_DIR/terraform-plan.json" \
-              --state-rm \
-              --working-dir "$TF_WORKDIR"
+              --plan-json "$OUTPUT_DIR/terraform-plan.json"
           else
-            echo "No plan file present; skipping exact-match destroy guard."
+            echo "Exact-match ADD guard not required for $REQUEST_ACTIVITY."
           fi
 
       - name: Terraform apply
@@ -403,7 +429,7 @@ jobs:
               declare -A TARGET_IMPORT_ID=()
 
               python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_revoke_targets.py" \
-                --input-json "$TFVARS_JSON" \
+                --input-json "$REQUEST_TFVARS_JSON" \
                 --output-tsv "$OUTPUT_DIR/revoke_targets.tsv"
 
               while IFS=$'\t' read -r target import_id; do
@@ -487,11 +513,23 @@ jobs:
             terraform -chdir="$TF_WORKDIR" show -json "$GITHUB_WORKSPACE/$TFPLAN_MIXED_ADD_BIN" > "$OUTPUT_DIR/terraform-mixed-add-plan.json"
             python "$GITHUB_WORKSPACE/uda/scripts/object-access/guard_exact_match_destroy.py" \
               --tfvars-json "$GITHUB_WORKSPACE/$TFVARS_JSON" \
-              --plan-json "$OUTPUT_DIR/terraform-mixed-add-plan.json" \
-              --state-rm \
-              --working-dir "$TF_WORKDIR"
+              --plan-json "$OUTPUT_DIR/terraform-mixed-add-plan.json"
             terraform -chdir="$TF_WORKDIR" apply -lock-timeout=10m -auto-approve "$GITHUB_WORKSPACE/$TFPLAN_MIXED_ADD_BIN"
           fi
+
+      - name: Persist active-grants manifest
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
+        shell: bash
+        run: |
+          az storage blob upload \
+            --account-name "$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
+            --container-name "$TF_BACKEND_CONTAINER_NAME" \
+            --name "$ACTIVE_GRANTS_BLOB" \
+            --file "$TFVARS_JSON" \
+            --account-key "$TF_BACKEND_ACCESS_KEY" \
+            --overwrite true \
+            --only-show-errors
+          echo "Persistent active-grants manifest updated: $ACTIVE_GRANTS_BLOB"
 
       - name: Publish plan outputs
         if: ${{ always() && steps.prep_paths.outcome == 'success' }}
