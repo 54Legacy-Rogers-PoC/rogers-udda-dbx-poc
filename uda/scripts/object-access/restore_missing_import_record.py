@@ -24,7 +24,7 @@ def _target_key(record: dict) -> str:
     env = _normalize(record.get("environment")).upper()
     access_for = _normalize(record.get("access_for") or record.get("principal_type")).lower()
     principal_name = _normalize(record.get("principal_name")).lower()
-    obj_type = _normalize(record.get("object_type")).lower()
+    obj_type = _normalize(record.get("object_type")).upper()
     catalog = _normalize(record.get("catalog_name") or record.get("catalog")).lower()
     schema = _normalize(record.get("schema_name") or record.get("schema")).lower()
     object_name = _normalize(record.get("object_name")).lower()
@@ -36,18 +36,18 @@ def _resource_address(record: dict) -> str:
     env = _normalize(record.get("environment")).upper()
     access_for = _normalize(record.get("access_for") or record.get("principal_type")).lower()
     principal_name = _normalize(record.get("principal_name")).lower()
-    obj_type = _normalize(record.get("object_type")).lower()
+    obj_type = _normalize(record.get("object_type")).upper()
     catalog = _normalize(record.get("catalog_name") or record.get("catalog")).lower()
     schema = _normalize(record.get("schema_name") or record.get("schema")).lower()
     object_name = _normalize(record.get("object_name")).lower()
     privilege = _normalize(record.get("privilege")).upper()
 
-    if obj_type == "catalog":
-        return f'module.object_access.databricks_grant.catalog_add["{env}|{access_for}|{principal_name}|catalog|{catalog}|{privilege}"]'
-    if obj_type == "schema":
-        return f'module.object_access.databricks_grant.schema_add["{env}|{access_for}|{principal_name}|schema|{catalog}|{schema}|{privilege}"]'
-    if obj_type == "view":
-        return f'module.object_access.databricks_grant.view_add["{env}|{access_for}|{principal_name}|view|{catalog}|{schema}|{object_name}|{privilege}"]'
+    if obj_type == "CATALOG":
+        return f'module.object_access.databricks_grant.catalog_add["{env}|{access_for}|{principal_name}|CATALOG|{catalog}|{privilege}"]'
+    if obj_type == "SCHEMA":
+        return f'module.object_access.databricks_grant.schema_add["{env}|{access_for}|{principal_name}|SCHEMA|{catalog}|{schema}|{privilege}"]'
+    if obj_type == "VIEW":
+        return f'module.object_access.databricks_grant.view_add["{env}|{access_for}|{principal_name}|VIEW|{catalog}|{schema}|{object_name}|{privilege}"]'
     return ""
 
 
@@ -66,10 +66,28 @@ def _restore_record(payload: dict, target: str) -> bool:
 
     normalized = match.group(1)
     parts = normalized.split("|")
-    if len(parts) < 8:
+    if len(parts) < 7:
         return False
 
-    env, access_for, principal_name, obj_type, catalog, schema, object_name, privilege = parts
+    env, access_for, principal_name, obj_type, catalog, *rest = parts
+    if obj_type == "VIEW":
+        if len(rest) < 3:
+            return False
+        schema, object_name, privilege = rest[-3], rest[-2], rest[-1]
+    elif obj_type == "SCHEMA":
+        if len(rest) < 2:
+            return False
+        schema, privilege = rest[-2], rest[-1]
+        object_name = ""
+    elif obj_type == "CATALOG":
+        if len(rest) < 1:
+            return False
+        privilege = rest[-1]
+        schema = ""
+        object_name = ""
+    else:
+        return False
+
     restored = {
         "record_id": f"restored-{env.lower()}-{principal_name}",
         "activity": "ADD",

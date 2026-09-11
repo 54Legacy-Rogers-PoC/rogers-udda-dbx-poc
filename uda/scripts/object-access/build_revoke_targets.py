@@ -20,7 +20,7 @@ def _build_target(record: dict) -> tuple[str, str] | None:
     if activity not in {"REMOVE", "REVOKE"}:
         return None
 
-    obj_type = _normalize(record.get("object_type")).lower()
+    obj_type = _normalize(record.get("object_type")).upper()
     env = _normalize(record.get("environment")).upper()
     access_for = _normalize(record.get("access_for") or record.get("principal_type")).lower()
     principal_name = _normalize(record.get("principal_name"))
@@ -30,14 +30,14 @@ def _build_target(record: dict) -> tuple[str, str] | None:
     object_name = _normalize(record.get("object_name")).lower()
     privilege = _normalize(record.get("privilege")).upper()
 
-    if obj_type == "catalog":
-        target = f'module.object_access.databricks_grant.catalog_add["{env}|{access_for}|{principal_key}|catalog|{catalog}|{privilege}"]'
+    if obj_type == "CATALOG":
+        target = f'module.object_access.databricks_grant.catalog_add["{env}|{access_for}|{principal_key}|CATALOG|{catalog}|{privilege}"]'
         import_id = f"catalog/{catalog}/{principal_name}"
-    elif obj_type == "schema":
-        target = f'module.object_access.databricks_grant.schema_add["{env}|{access_for}|{principal_key}|schema|{catalog}|{schema}|{privilege}"]'
+    elif obj_type == "SCHEMA":
+        target = f'module.object_access.databricks_grant.schema_add["{env}|{access_for}|{principal_key}|SCHEMA|{catalog}|{schema}|{privilege}"]'
         import_id = f"schema/{catalog}.{schema}/{principal_name}"
-    elif obj_type == "view":
-        target = f'module.object_access.databricks_grant.view_add["{env}|{access_for}|{principal_key}|view|{catalog}|{schema}|{object_name}|{privilege}"]'
+    elif obj_type == "VIEW":
+        target = f'module.object_access.databricks_grant.view_add["{env}|{access_for}|{principal_key}|VIEW|{catalog}|{schema}|{object_name}|{privilege}"]'
         import_id = f"table/{catalog}.{schema}.{object_name}/{principal_name}"
     else:
         return None

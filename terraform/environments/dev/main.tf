@@ -12,11 +12,10 @@ locals {
         upper(r.environment != null && r.environment != "" ? r.environment : ""),
         lower(r.access_for != null && r.access_for != "" ? r.access_for : (r.principal_type != null && r.principal_type != "" ? r.principal_type : "")),
         lower(r.principal_name != null && r.principal_name != "" ? r.principal_name : ""),
-        lower(r.object_type != null && r.object_type != "" ? r.object_type : ""),
+        upper(r.object_type != null && r.object_type != "" ? r.object_type : ""),
         lower(r.catalog_name != null && r.catalog_name != "" ? r.catalog_name : (r.catalog != null && r.catalog != "" ? r.catalog : "")),
         lower(r.schema_name != null && r.schema_name != "" ? r.schema_name : (r.schema != null && r.schema != "" ? r.schema : "")),
         lower(r.object_name != null && r.object_name != "" ? r.object_name : ""),
-        lower(r.folder_path != null && r.folder_path != "" ? r.folder_path : ""),
         upper(r.privilege != null && r.privilege != "" ? r.privilege : "")
       ])
       activity = upper(try(r.activity, ""))
