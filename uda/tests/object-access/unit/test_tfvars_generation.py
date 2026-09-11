@@ -106,6 +106,17 @@ def test_build_tfvars_payload_multiple_environments_fail() -> None:
 		generator.build_tfvars_payload(payload)
 
 
+def test_build_tfvars_payload_keeps_principal_in_identity() -> None:
+	first = _record(record_id="OA-0001", principal_name="abeer@54legacy.com", object_type="VIEW", schema="vw_schema", object_name="vw_vvvvv", privilege="SELECT")
+	second = _record(record_id="OA-0002", principal_name="furqan@54legacy.com", object_type="VIEW", schema="vw_schema", object_name="vw_vvvvv", privilege="SELECT")
+	payload = _parsed_payload([first, second])
+
+	result = generator.build_tfvars_payload(payload)
+	identities = [r["principal_name"] for r in result["object_access_records"]]
+	assert identities == ["abeer@54legacy.com", "furqan@54legacy.com"]
+	assert len({(r["principal_name"], r["object_name"], r["privilege"]) for r in result["object_access_records"]}) == 2
+
+
 def test_load_json_validates_required_shape(tmp_path: Path) -> None:
 	input_json = tmp_path / "parsed.json"
 	input_json.write_text(json.dumps({"request_id": "R1", "records": []}), encoding="utf-8")
