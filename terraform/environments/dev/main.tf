@@ -3,7 +3,11 @@
 locals {
   normalized_records = [
     for r in var.object_access_records : {
-      row_id         = try(r.row_id, r.record_id)
+      row_id = (
+        try(r.row_id, "") != "" ? r.row_id :
+        try(r.record_id, "") != "" ? r.record_id :
+        tostring(try(r.row_number, 0))
+      )
       activity       = upper(try(r.activity, ""))
       object_type    = lower(try(r.object_type, ""))
       principal_type = try(r.principal_type, r.access_for)
