@@ -285,17 +285,17 @@ jobs:
               | select((.activity | ascii_upcase) == "REMOVE")
               | if ((.object_type | ascii_upcase) == "CATALOG") then
                   [
-                    "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
+                    "module.object_access.databricks_grant.catalog_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
                     "catalog/\(.catalog)/\(.principal_name)"
                   ]
                 elif ((.object_type | ascii_upcase) == "SCHEMA") then
                   [
-                    "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
+                    "module.object_access.databricks_grant.schema_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
                     "schema/\(.catalog).\(.schema)/\(.principal_name)"
                   ]
                 elif ((.object_type | ascii_upcase) == "VIEW") then
                   [
-                    "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
+                    "module.object_access.databricks_grant.view_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
                     "table/\(.catalog).\(.schema).\(.object_name)/\(.principal_name)"
                   ]
                 else empty end
@@ -401,17 +401,17 @@ jobs:
                 | select((.activity | ascii_upcase) == "REMOVE")
                 | if ((.object_type | ascii_upcase) == "CATALOG") then
                     [
-                      "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
+                      "module.object_access.databricks_grant.catalog_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
                       "catalog/\(.catalog)/\(.principal_name)"
                     ]
                   elif ((.object_type | ascii_upcase) == "SCHEMA") then
                     [
-                      "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
+                      "module.object_access.databricks_grant.schema_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
                       "schema/\(.catalog).\(.schema)/\(.principal_name)"
                     ]
                   elif ((.object_type | ascii_upcase) == "VIEW") then
                     [
-                      "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
+                      "module.object_access.databricks_grant.view_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
                       "table/\(.catalog).\(.schema).\(.object_name)/\(.principal_name)"
                     ]
                   else empty end
