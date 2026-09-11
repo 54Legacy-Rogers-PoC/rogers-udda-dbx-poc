@@ -11,21 +11,47 @@ variable "environment" {
 }
 
 variable "object_access_records" {
-  description = "Object-level access records parsed from the Excel template"
+  description = "Object-level access records from the workflow tfvars payload"
   type = list(object({
-    row_id         = string
-    activity       = string
-    object_type    = string
-    principal_type = string
-    principal_name = string
-    catalog_name   = optional(string)
-    schema_name    = optional(string)
-    object_name    = optional(string)
-    folder_path    = optional(string)
-    privileges     = list(string)
-    justification  = string
+    record_id              = optional(string)
+    row_id                 = optional(string)
+    activity               = string
+    environment            = optional(string)
+    access_for             = optional(string)
+    principal_type         = optional(string)
+    principal_name         = string
+    object_type            = string
+    catalog                = optional(string)
+    catalog_name           = optional(string)
+    schema                 = optional(string)
+    schema_name            = optional(string)
+    object_name            = optional(string)
+    folder_path            = optional(string)
+    privilege              = optional(string)
+    privileges             = optional(list(string))
+    justification          = string
+    additional_information = optional(string)
+    row_number             = optional(number)
   }))
   default = []
+}
+
+variable "record_count" {
+  description = "Total number of object-access records that were generated"
+  type        = number
+  default     = 0
+}
+
+variable "activities" {
+  description = "Distinct activity values in the generated tfvars record set"
+  type        = list(string)
+  default     = []
+}
+
+variable "access_for_types" {
+  description = "Distinct access_for values in the generated tfvars record set"
+  type        = list(string)
+  default     = []
 }
 
 # DDD-DBX-01 sends cluster actions separately from object access so the root

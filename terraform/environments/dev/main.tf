@@ -2,10 +2,19 @@
 # focused child modules.
 locals {
   normalized_records = [
-    for r in var.object_access_records : merge(r, {
-      activity    = upper(r.activity)
-      object_type = lower(r.object_type)
-    })
+    for r in var.object_access_records : {
+      row_id         = try(r.row_id, r.record_id)
+      activity       = upper(try(r.activity, ""))
+      object_type    = lower(try(r.object_type, ""))
+      principal_type = try(r.principal_type, r.access_for)
+      principal_name = try(r.principal_name, "")
+      catalog_name   = try(r.catalog_name, r.catalog)
+      schema_name    = try(r.schema_name, r.schema)
+      object_name    = try(r.object_name, "")
+      folder_path    = try(r.folder_path, "")
+      privileges     = try(r.privileges, [r.privilege])
+      justification  = try(r.justification, "")
+    }
   ]
 
   catalog_records = {
@@ -75,6 +84,7 @@ module "object_access" {
 # Service-account cluster access is isolated from object access so DDD-DBX-01
 # can evolve independently.
 module "service_account_cluster" {
+  count  = 0
   source = "../../modules/service_account"
 
   add_records    = local.service_account_cluster_add_records
@@ -84,6 +94,7 @@ module "service_account_cluster" {
 # AD group cluster ADD access is isolated so it mirrors the dedicated ADD
 # workflow and keeps Terraform addresses activity-specific.
 module "cluster_ad_group_add" {
+  count  = 0
   source = "../../modules/cluster-adgroup-add"
 
   add_records = local.cluster_ad_group_add_records
@@ -92,6 +103,7 @@ module "cluster_ad_group_add" {
 # AD group cluster REMOVE access is isolated so it mirrors the dedicated REMOVE
 # workflow and avoids mixing both activity types inside one child module.
 module "cluster_ad_group_remove" {
+  count  = 0
   source = "../../modules/cluster-adgroup-remove"
 
   remove_records = local.cluster_ad_group_remove_records
