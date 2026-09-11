@@ -301,6 +301,18 @@ jobs:
                 import_id="${TARGET_IMPORT_ID[$t]:-}"
                 if [ -n "$import_id" ]; then
                   echo "Target not in state. Attempting import for revoke: $import_id"
+                  if python "$GITHUB_WORKSPACE/uda/scripts/object-access/restore_missing_import_record.py" \
+                    --input-json "$TFVARS_JSON" \
+                    --output-json "$TFVARS_JSON" \
+                    --target "$t"; then
+                    echo "Recovered config entry for stale revoke target in live tfvars: $t"
+                  fi
+                  if python "$GITHUB_WORKSPACE/uda/scripts/object-access/restore_missing_import_record.py" \
+                    --input-json "$TFVARS_JSON" \
+                    --output-json "$TFVARS_IMPORT_JSON" \
+                    --target "$t"; then
+                    echo "Recovered config entry for stale revoke target in import tfvars: $t"
+                  fi
                   if terraform -chdir="$TF_WORKDIR" import -var-file="$GITHUB_WORKSPACE/$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
                     echo "Imported missing target into state: $t"
                     target_args+=("-target=$t")
