@@ -9,15 +9,15 @@ locals {
         tostring(try(r.row_number, 0))
       )
       resource_key = join("|", [
-        upper(try(r.environment, "")),
-        lower(try(r.access_for, try(r.principal_type, ""))),
-        lower(try(r.principal_name, "")),
-        lower(try(r.object_type, "")),
-        lower(try(r.catalog_name, try(r.catalog, ""))),
-        lower(try(r.schema_name, try(r.schema, ""))),
-        lower(try(r.object_name, "")),
-        lower(try(r.folder_path, "")),
-        upper(try(r.privilege, ""))
+        upper(coalesce(try(r.environment, ""), "")),
+        lower(coalesce(try(r.access_for, try(r.principal_type, "")), "")),
+        lower(coalesce(try(r.principal_name, ""), "")),
+        lower(coalesce(try(r.object_type, ""), "")),
+        lower(coalesce(try(r.catalog_name, try(r.catalog, "")), "")),
+        lower(coalesce(try(r.schema_name, try(r.schema, "")), "")),
+        lower(coalesce(try(r.object_name, ""), "")),
+        lower(coalesce(try(r.folder_path, ""), "")),
+        upper(coalesce(try(r.privilege, ""), ""))
       ])
       activity       = upper(try(r.activity, ""))
       object_type    = lower(try(r.object_type, ""))
