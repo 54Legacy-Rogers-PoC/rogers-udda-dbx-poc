@@ -138,7 +138,7 @@ jobs:
 
           REQUEST_ID_VALUE="${REQUEST_ID:-${TEMPLATE_FILE##*/}}"
           REQUEST_ID_VALUE="${REQUEST_ID_VALUE%.*}"
-          TFSTATE_KEY_EFFECTIVE="object-access/default.tfstate"
+          TFSTATE_KEY_EFFECTIVE="addremove.tfstate"
 
           for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
@@ -162,7 +162,7 @@ jobs:
 
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
 
-          echo "Using shared backend key: $TFSTATE_KEY_EFFECTIVE"
+          echo "Using fixed backend key: $TFSTATE_KEY_EFFECTIVE"
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -284,17 +284,17 @@ jobs:
               | select((.activity | ascii_upcase) == "REMOVE")
               | if ((.object_type | ascii_upcase) == "CATALOG") then
                   [
-                    "module.object_access.databricks_grant.catalog_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
+                    "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
                     "catalog/\(.catalog)/\(.principal_name)"
                   ]
                 elif ((.object_type | ascii_upcase) == "SCHEMA") then
                   [
-                    "module.object_access.databricks_grant.schema_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
+                    "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
                     "schema/\(.catalog).\(.schema)/\(.principal_name)"
                   ]
                 elif ((.object_type | ascii_upcase) == "VIEW") then
                   [
-                    "module.object_access.databricks_grant.view_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
+                    "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
                     "table/\(.catalog).\(.schema).\(.object_name)/\(.principal_name)"
                   ]
                 else empty end
@@ -400,17 +400,17 @@ jobs:
                 | select((.activity | ascii_upcase) == "REMOVE")
                 | if ((.object_type | ascii_upcase) == "CATALOG") then
                     [
-                      "module.object_access.databricks_grant.catalog_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
+                      "module.object_access.databricks_grant.catalog_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|CATALOG|\(.catalog)|\((.privilege | ascii_upcase))\"]",
                       "catalog/\(.catalog)/\(.principal_name)"
                     ]
                   elif ((.object_type | ascii_upcase) == "SCHEMA") then
                     [
-                      "module.object_access.databricks_grant.schema_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
+                      "module.object_access.databricks_grant.schema_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|SCHEMA|\(.catalog)|\(.schema)|\((.privilege | ascii_upcase))\"]",
                       "schema/\(.catalog).\(.schema)/\(.principal_name)"
                     ]
                   elif ((.object_type | ascii_upcase) == "VIEW") then
                     [
-                      "module.object_access.databricks_grant.view_access[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
+                      "module.object_access.databricks_grant.view_add[\"\((.environment | ascii_upcase))|\((.access_for | ascii_downcase))|\((.principal_name | ascii_downcase))|VIEW|\(.catalog)|\(.schema)|\(.object_name)|\((.privilege | ascii_upcase))\"]",
                       "table/\(.catalog).\(.schema).\(.object_name)/\(.principal_name)"
                     ]
                   else empty end

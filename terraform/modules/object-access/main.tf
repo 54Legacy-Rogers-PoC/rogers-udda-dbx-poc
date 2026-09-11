@@ -1,6 +1,6 @@
 # Catalog grants are keyed by template row id so each requested change has a
 # stable Terraform address.
-resource "databricks_grant" "catalog_access" {
+resource "databricks_grant" "catalog_add" {
   for_each = var.catalog_records
 
   catalog    = each.value.catalog_name
@@ -9,7 +9,7 @@ resource "databricks_grant" "catalog_access" {
 }
 
 # Schema grants follow the same pattern but use catalog.schema addressing.
-resource "databricks_grant" "schema_access" {
+resource "databricks_grant" "schema_add" {
   for_each = var.schema_records
 
   schema     = "${each.value.catalog_name}.${each.value.schema_name}"
@@ -19,7 +19,7 @@ resource "databricks_grant" "schema_access" {
 
 # Views are granted through the Databricks table API using the fully qualified
 # catalog.schema.object path.
-resource "databricks_grant" "view_access" {
+resource "databricks_grant" "view_add" {
   for_each = var.view_records
 
   table      = "${each.value.catalog_name}.${each.value.schema_name}.${each.value.object_name}"
