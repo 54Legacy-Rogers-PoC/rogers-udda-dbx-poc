@@ -376,7 +376,9 @@ jobs:
             terraform -chdir="$TF_WORKDIR" show -json "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$OUTPUT_DIR/terraform-plan.json"
             python "$GITHUB_WORKSPACE/uda/scripts/object-access/guard_exact_match_destroy.py" \
               --tfvars-json "$GITHUB_WORKSPACE/$TFVARS_JSON" \
-              --plan-json "$OUTPUT_DIR/terraform-plan.json"
+              --plan-json "$OUTPUT_DIR/terraform-plan.json" \
+              --state-rm \
+              --working-dir "$TF_WORKDIR"
           else
             echo "No plan file present; skipping exact-match destroy guard."
           fi
@@ -485,7 +487,9 @@ jobs:
             terraform -chdir="$TF_WORKDIR" show -json "$GITHUB_WORKSPACE/$TFPLAN_MIXED_ADD_BIN" > "$OUTPUT_DIR/terraform-mixed-add-plan.json"
             python "$GITHUB_WORKSPACE/uda/scripts/object-access/guard_exact_match_destroy.py" \
               --tfvars-json "$GITHUB_WORKSPACE/$TFVARS_JSON" \
-              --plan-json "$OUTPUT_DIR/terraform-mixed-add-plan.json"
+              --plan-json "$OUTPUT_DIR/terraform-mixed-add-plan.json" \
+              --state-rm \
+              --working-dir "$TF_WORKDIR"
             terraform -chdir="$TF_WORKDIR" apply -lock-timeout=10m -auto-approve "$GITHUB_WORKSPACE/$TFPLAN_MIXED_ADD_BIN"
           fi
 
