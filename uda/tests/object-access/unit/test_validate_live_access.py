@@ -81,3 +81,64 @@ def test_get_databricks_token_uses_workspace_oauth(monkeypatch: pytest.MonkeyPat
         "data": {"grant_type": "client_credentials", "scope": "all-apis"},
         "timeout": 60,
     }
+
+
+def test_fetch_databricks_grants_uses_singular_securable_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    requested_urls: list[str] = []
+
+    class Response:
+        status_code = 404
+        text = ""
+
+    def fake_get(url: str, **_kwargs: object) -> Response:
+        requested_urls.append(url)
+        return Response()
+
+    monkeypatch.setattr(validator.requests, "get", fake_get)
+    records = [
+        {"object_type": "CATALOG", "catalog_name": "edl_prod"},
+        {"object_type": "SCHEMA", "catalog_name": "edl_prod", "schema_name": "vw_schema"},
+        {
+            "object_type": "VIEW",
+            "catalog_name": "edl_prod",
+            "schema_name": "vw_schema",
+            "object_name": "employee_data",
+        },
+    ]
+
+    validator._fetch_databricks_grants("https://adb-example.azuredatabricks.net", "token", records)
+
+    assert requested_urls == [
+        "https://adb-example.azuredatabricks.net/api/2.1/unity-catalog/permissions/catalog/edl_prod",
+        "https://adb-example.azuredatabricks.net/api/2.1/unity-catalog/permissions/schema/edl_prod.vw_schema",
+        "https://adb-example.azuredatabricks.net/api/2.1/unity-catalog/permissions/table/edl_prod.vw_schema.employee_data",
+    ]
+
+
+def test_fetch_databricks_grants_preserves_requested_object_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Response:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {
+                "privilege_assignments": [{
+                    "principal": "user:abeer@54legacy.com",
+                    "privileges": ["SELECT"],
+                }]
+            }
+
+    monkeypatch.setattr(validator.requests, "get", lambda *_args, **_kwargs: Response())
+    records = [{
+        "object_type": "VIEW",
+        "catalog_name": "edl_prod",
+        "schema_name": "vw_schema",
+        "object_name": "employee_data",
+    }]
+
+    live = validator._fetch_databricks_grants(
+        "https://adb-example.azuredatabricks.net", "token", records
+    )
+
+    assert live == {"VIEW|edl_prod|vw_schema|employee_data|abeer@54legacy.com|SELECT"}

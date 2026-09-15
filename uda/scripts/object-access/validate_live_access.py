@@ -70,11 +70,18 @@ def _iter_assignments(payload: Any) -> list[dict[str, Any]]:
     return [payload]
 
 
-def _extract_live_keys(payload: Any, object_type: str) -> set[str]:
+def _extract_live_keys(
+    payload: Any,
+    object_type: str,
+    *,
+    catalog_name: str = "",
+    schema_name: str = "",
+    requested_object_name: str = "",
+) -> set[str]:
     live: set[str] = set()
-    object_name = _normalize(payload.get("name") or payload.get("table") or payload.get("schema") or payload.get("catalog")).lower()
-    catalog = _normalize(payload.get("catalog_name") or payload.get("catalog")).lower()
-    schema = _normalize(payload.get("schema_name") or payload.get("schema")).lower()
+    object_name = _normalize(requested_object_name or payload.get("name") or payload.get("table") or payload.get("schema") or payload.get("catalog")).lower()
+    catalog = _normalize(catalog_name or payload.get("catalog_name") or payload.get("catalog")).lower()
+    schema = _normalize(schema_name or payload.get("schema_name") or payload.get("schema")).lower()
     if "/" in object_name and object_type == "CATALOG":
         object_name = ""
     for assignment in _iter_assignments(payload):
@@ -125,7 +132,7 @@ def _fetch_databricks_grants(host: str, token: str, desired_records: list[dict[s
     live: set[str] = set()
     unique_catalogs: set[str] = set()
     unique_schemas: set[str] = set()
-    unique_views: set[str] = set()
+    unique_tables: dict[str, str] = {}
 
     for record in desired_records:
         if not isinstance(record, dict):
@@ -139,35 +146,43 @@ def _fetch_databricks_grants(host: str, token: str, desired_records: list[dict[s
         elif object_type == "SCHEMA" and catalog and schema:
             unique_schemas.add(f"{catalog}.{schema}")
         elif object_type in {"VIEW", "TABLE"} and catalog and schema and object_name:
-            unique_views.add(f"{catalog}.{schema}.{object_name}")
+            unique_tables[f"{catalog}.{schema}.{object_name}"] = object_type
 
     for catalog in sorted(unique_catalogs):
-        url = f"{host.rstrip('/')}/api/2.1/unity-catalog/permissions/catalogs/{catalog}"
+        url = f"{host.rstrip('/')}/api/2.1/unity-catalog/permissions/catalog/{catalog}"
         response = requests.get(url, headers=headers, timeout=60)
         if response.status_code == 404:
             continue
         if response.status_code != 200:
             raise RuntimeError(f"Catalog permissions query failed for {catalog}: {response.status_code} {response.text}")
-        live |= _extract_live_keys(response.json(), "CATALOG")
+        live |= _extract_live_keys(response.json(), "CATALOG", catalog_name=catalog)
 
     for full_schema_name in sorted(unique_schemas):
-        url = f"{host.rstrip('/')}/api/2.1/unity-catalog/permissions/schemas/{full_schema_name}"
+        url = f"{host.rstrip('/')}/api/2.1/unity-catalog/permissions/schema/{full_schema_name}"
         response = requests.get(url, headers=headers, timeout=60)
         if response.status_code == 404:
             continue
         if response.status_code != 200:
             raise RuntimeError(f"Schema permissions query failed for {full_schema_name}: {response.status_code} {response.text}")
         payload = response.json()
-        live |= _extract_live_keys(payload, "SCHEMA")
+        catalog, schema = full_schema_name.split(".", 1)
+        live |= _extract_live_keys(payload, "SCHEMA", catalog_name=catalog, schema_name=schema)
 
-    for full_table_name in sorted(unique_views):
-        url = f"{host.rstrip('/')}/api/2.1/unity-catalog/permissions/tables/{full_table_name}"
+    for full_table_name in sorted(unique_tables):
+        url = f"{host.rstrip('/')}/api/2.1/unity-catalog/permissions/table/{full_table_name}"
         response = requests.get(url, headers=headers, timeout=60)
         if response.status_code == 404:
             continue
         if response.status_code != 200:
             raise RuntimeError(f"Table permissions query failed for {full_table_name}: {response.status_code} {response.text}")
-        live |= _extract_live_keys(response.json(), "VIEW")
+        catalog, schema, object_name = full_table_name.split(".", 2)
+        live |= _extract_live_keys(
+            response.json(),
+            unique_tables[full_table_name],
+            catalog_name=catalog,
+            schema_name=schema,
+            requested_object_name=object_name,
+        )
 
     return live
 
