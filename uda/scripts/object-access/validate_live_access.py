@@ -101,25 +101,16 @@ def get_databricks_token() -> str:
     tenant_id = _normalize(os.getenv("DB_TENANT_ID") or os.getenv("AZURE_TENANT_ID"))
     client_id = _normalize(os.getenv("DB_CLIENT_ID") or os.getenv("AZURE_CLIENT_ID"))
     client_secret = _normalize(os.getenv("DB_CLIENT_SECRET") or os.getenv("AZURE_CLIENT_SECRET"))
-    resource_app_id = _normalize(
-        os.getenv("DB_RESOURCE_APP_ID")
-        or os.getenv("DATABRICKS_RESOURCE_APP_ID")
-        or os.getenv("DATABRICKS_APP_ID")
-        or os.getenv("DATBRICKS_AAD_RESOURCE_ID")
-        or "aaec40b0-c0ae-4211-a98b-6fc160abb71b"
-    )
 
     if not tenant_id or not client_id or not client_secret:
         raise RuntimeError("Missing Azure service principal settings: DB_TENANT_ID / DB_CLIENT_ID / DB_CLIENT_SECRET")
-    if not resource_app_id:
-        raise RuntimeError("Missing Databricks resource app ID: DB_RESOURCE_APP_ID / DATABRICKS_RESOURCE_APP_ID")
 
     token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     payload = {
         "client_id": client_id,
         "client_secret": client_secret,
         "grant_type": "client_credentials",
-        "scope": f"{resource_app_id}/.default",
+        "scope": "2ff814a6-3304-4ab8-85cb-cd0e6f20b7c1/.default",
     }
 
     response = requests.post(token_url, data=payload, timeout=60)
