@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -96,6 +97,32 @@ def _extract_live_keys(payload: Any, object_type: str) -> set[str]:
     return live
 
 
+def get_databricks_token() -> str:
+    tenant_id = _normalize(os.getenv("DB_TENANT_ID") or os.getenv("AZURE_TENANT_ID"))
+    client_id = _normalize(os.getenv("DB_CLIENT_ID") or os.getenv("AZURE_CLIENT_ID"))
+    client_secret = _normalize(os.getenv("DB_CLIENT_SECRET") or os.getenv("AZURE_CLIENT_SECRET"))
+
+    if not tenant_id or not client_id or not client_secret:
+        raise RuntimeError("Missing Azure service principal settings: DB_TENANT_ID / DB_CLIENT_ID / DB_CLIENT_SECRET")
+
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    payload = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "grant_type": "client_credentials",
+        "scope": "2ff814a6-3304-4ab8-85cb-cd0e6f20b7c1/.default",
+    }
+
+    response = requests.post(token_url, data=payload, timeout=60)
+    if response.status_code != 200:
+        raise RuntimeError(f"AAD token acquisition failed: {response.status_code} {response.text}")
+
+    token = response.json().get("access_token")
+    if not token:
+        raise RuntimeError("AAD token response did not include an access_token")
+    return token
+
+
 def _fetch_databricks_grants(host: str, token: str, desired_records: list[dict[str, Any]]) -> set[str]:
     headers = {"Authorization": f"Bearer {token}"}
     live: set[str] = set()
@@ -170,7 +197,10 @@ def main() -> int:
 
     desired = _manifest_keys(manifest_payload)
     try:
-        live = _fetch_databricks_grants(args.databricks_host, args.databricks_token, records)
+        token = args.databricks_token
+        if not token or token == "REPLACE_WITH_AAD_TOKEN":
+            token = get_databricks_token()
+        live = _fetch_databricks_grants(args.databricks_host, token, records)
     except Exception as exc:  # pylint: disable=broad-except
         print(f"Databricks validation failed: {exc}", file=sys.stderr)
         return 2
