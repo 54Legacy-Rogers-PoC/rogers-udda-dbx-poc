@@ -535,7 +535,10 @@ jobs:
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         shell: bash
         run: |
-          DATABRICKS_REST_TOKEN="$(az account get-access-token --resource https://databricks.azure.net/ --query accessToken -o tsv)"
+          DATABRICKS_REST_TOKEN="$(az account get-access-token \
+            --resource 2ff814a6-3304-4ab8-85cb-cd0e6f20b7c1 \
+            --query accessToken -o tsv)"
+
           if [ -z "$DATABRICKS_REST_TOKEN" ]; then
             echo "Failed to acquire Databricks AAD access token from Azure login." >&2
             exit 1
