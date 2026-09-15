@@ -4,6 +4,8 @@ import importlib.util
 from pathlib import Path
 import sys
 
+import pytest
+
 
 def _load_module():
     repo_root = Path(__file__).resolve().parents[4]
@@ -48,3 +50,34 @@ def test_manifest_keys_match_live_grant_identity() -> None:
     }
 
     assert validator._manifest_keys(manifest) == {"VIEW|edl_prod|vw_schema|vw_b|abeer@54legacy.com|SELECT"}
+
+
+def test_get_databricks_token_uses_workspace_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABRICKS_CLIENT_ID", "client-id")
+    monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "oauth-secret")
+    captured: dict[str, object] = {}
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json() -> dict[str, str]:
+            return {"access_token": "workspace-token"}
+
+    def fake_post(url: str, **kwargs: object) -> Response:
+        captured["url"] = url
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(validator.requests, "post", fake_post)
+
+    token = validator.get_databricks_token("https://adb-example.azuredatabricks.net/")
+
+    assert token == "workspace-token"
+    assert captured == {
+        "url": "https://adb-example.azuredatabricks.net/oidc/v1/token",
+        "auth": ("client-id", "oauth-secret"),
+        "data": {"grant_type": "client_credentials", "scope": "all-apis"},
+        "timeout": 60,
+    }

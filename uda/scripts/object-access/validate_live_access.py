@@ -97,25 +97,22 @@ def _extract_live_keys(payload: Any, object_type: str) -> set[str]:
     return live
 
 
-def get_databricks_token() -> str:
-    tenant_id = _normalize(os.getenv("DB_TENANT_ID") or os.getenv("AZURE_TENANT_ID"))
-    client_id = _normalize(os.getenv("DB_CLIENT_ID") or os.getenv("AZURE_CLIENT_ID"))
-    client_secret = _normalize(os.getenv("DB_CLIENT_SECRET") or os.getenv("AZURE_CLIENT_SECRET"))
+def get_databricks_token(host: str) -> str:
+    client_id = _normalize(os.getenv("DATABRICKS_CLIENT_ID"))
+    client_secret = _normalize(os.getenv("DATABRICKS_CLIENT_SECRET"))
 
-    if not tenant_id or not client_id or not client_secret:
-        raise RuntimeError("Missing Azure service principal settings: DB_TENANT_ID / DB_CLIENT_ID / DB_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise RuntimeError("Missing Databricks OAuth settings: DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET")
 
-    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    token_url = f"{host.rstrip('/')}/oidc/v1/token"
     payload = {
-        "client_id": client_id,
-        "client_secret": client_secret,
         "grant_type": "client_credentials",
-        "scope": "2ff814a6-3304-4ab8-85cb-cd0e6f20b7c1/.default",
+        "scope": "all-apis",
     }
 
-    response = requests.post(token_url, data=payload, timeout=60)
+    response = requests.post(token_url, auth=(client_id, client_secret), data=payload, timeout=60)
     if response.status_code != 200:
-        raise RuntimeError(f"AAD token acquisition failed: {response.status_code} {response.text}")
+        raise RuntimeError(f"Databricks OAuth token acquisition failed: {response.status_code} {response.text}")
 
     token = response.json().get("access_token")
     if not token:
@@ -179,7 +176,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate Databricks live grants against manifest")
     parser.add_argument("--manifest-json", required=True)
     parser.add_argument("--databricks-host", required=True)
-    parser.add_argument("--databricks-token", required=True)
+    parser.add_argument("--databricks-token", default="")
     parser.add_argument("--fail-on-missing", action="store_true")
     args = parser.parse_args()
 
@@ -198,8 +195,8 @@ def main() -> int:
     desired = _manifest_keys(manifest_payload)
     try:
         token = args.databricks_token
-        if not token or token == "REPLACE_WITH_AAD_TOKEN":
-            token = get_databricks_token()
+        if not token:
+            token = get_databricks_token(args.databricks_host)
         live = _fetch_databricks_grants(args.databricks_host, token, records)
     except Exception as exc:  # pylint: disable=broad-except
         print(f"Databricks validation failed: {exc}", file=sys.stderr)

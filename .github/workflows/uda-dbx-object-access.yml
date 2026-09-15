@@ -130,6 +130,7 @@ jobs:
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
           get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID
           get_kv_secret DATABRICKS_CLIENT_SECRET_VALUE DB-CLIENT-SECRET
+          get_kv_secret DATABRICKS_OAUTH_SECRET_VALUE DB-OAUTH-SECRET
           get_kv_secret DATABRICKS_TENANT_ID_VALUE DB-TENANT-ID
           get_kv_secret TFSTATE_RESOURCE_GROUP_VALUE TFSTATE-RESOURCE-GROUP
           get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT
@@ -140,7 +141,7 @@ jobs:
           REQUEST_ID_VALUE="${REQUEST_ID_VALUE%.*}"
           TFSTATE_KEY_EFFECTIVE="addremove.tfstate"
 
-          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
+          for v in DATABRICKS_HOST_VALUE DATABRICKS_CLIENT_ID_VALUE DATABRICKS_CLIENT_SECRET_VALUE DATABRICKS_OAUTH_SECRET_VALUE DATABRICKS_TENANT_ID_VALUE TFSTATE_RESOURCE_GROUP_VALUE TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE_CONTAINER_VALUE TFSTATE_ACCESS_KEY_VALUE; do
             if [ -z "${!v}" ]; then
               echo "Missing or empty secret value for $v from Key Vault $KV" >&2
               exit 1
@@ -148,11 +149,14 @@ jobs:
           done
 
           echo "::add-mask::$DATABRICKS_CLIENT_SECRET_VALUE"
+          echo "::add-mask::$DATABRICKS_OAUTH_SECRET_VALUE"
           echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
 
           echo "TF_VAR_databricks_host=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_id=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "TF_VAR_databricks_client_secret=$DATABRICKS_CLIENT_SECRET_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_CLIENT_SECRET=$DATABRICKS_OAUTH_SECRET_VALUE" >> "$GITHUB_ENV"
 
           echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RESOURCE_GROUP_VALUE" >> "$GITHUB_ENV"
           echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
@@ -535,19 +539,9 @@ jobs:
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         shell: bash
         run: |
-          DATABRICKS_REST_TOKEN="$(az account get-access-token \
-            --resource 2ff814a6-3304-4ab8-85cb-cd0e6f20b7c1 \
-            --query accessToken -o tsv)"
-
-          if [ -z "$DATABRICKS_REST_TOKEN" ]; then
-            echo "Failed to acquire Databricks AAD access token from Azure login." >&2
-            exit 1
-          fi
-
           python "$GITHUB_WORKSPACE/uda/scripts/object-access/validate_live_access.py" \
             --manifest-json "$TFVARS_JSON" \
             --databricks-host "$DATABRICKS_HOST" \
-            --databricks-token "$DATABRICKS_REST_TOKEN" \
             --fail-on-missing
 
       - name: Publish plan outputs
