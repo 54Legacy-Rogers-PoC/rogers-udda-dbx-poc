@@ -110,7 +110,7 @@ def get_databricks_token() -> str:
         "client_id": client_id,
         "client_secret": client_secret,
         "grant_type": "client_credentials",
-        "scope": "2ff814a6-3304-4ab8-85cb-cd0e6f20b7c1/.default",
+        "scope": "aaec40b0-c0ae-4211-a98b-6fc160abb71b/.default",
     }
 
     response = requests.post(token_url, data=payload, timeout=60)
