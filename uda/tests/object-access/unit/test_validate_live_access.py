@@ -53,8 +53,8 @@ def test_manifest_keys_match_live_grant_identity() -> None:
 
 
 def test_get_databricks_token_uses_workspace_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DATABRICKS_CLIENT_ID", "client-id")
-    monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "oauth-secret")
+    monkeypatch.setenv("DB_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("DB_OAUTH_CLIENT_SECRET", "oauth-secret")
     captured: dict[str, object] = {}
 
     class Response:
