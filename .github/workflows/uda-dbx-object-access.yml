@@ -540,7 +540,7 @@ jobs:
         shell: bash
         run: |
           python "$GITHUB_WORKSPACE/uda/scripts/object-access/validate_live_access.py" \
-            --manifest-json "$TFVARS_JSON" \
+            --manifest-json "$REQUEST_TFVARS_JSON" \
             --databricks-host "$DATABRICKS_HOST" \
             --fail-on-missing
 

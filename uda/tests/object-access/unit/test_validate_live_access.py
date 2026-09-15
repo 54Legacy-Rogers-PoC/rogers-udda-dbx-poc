@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 import pytest
+import yaml
 
 
 def _load_module():
@@ -142,3 +143,18 @@ def test_fetch_databricks_grants_preserves_requested_object_identity(monkeypatch
     )
 
     assert live == {"VIEW|edl_prod|vw_schema|employee_data|abeer@54legacy.com|SELECT"}
+
+
+def test_object_access_workflow_validates_current_request_only() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    workflow_path = repo_root / ".github" / "workflows" / "uda-dbx-object-access.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+
+    validation_steps = workflow["jobs"]["plan-object-access"]["steps"]
+    validate_step = next(
+        step for step in validation_steps if step.get("name") == "Validate live Databricks access vs manifest"
+    )
+    run = validate_step["run"]
+
+    assert '--manifest-json "$REQUEST_TFVARS_JSON"' in run
+    assert '--manifest-json "$TFVARS_JSON"' not in run
