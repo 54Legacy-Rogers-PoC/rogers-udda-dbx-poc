@@ -535,15 +535,6 @@ jobs:
             --only-show-errors
           echo "Persistent active-grants manifest updated: $ACTIVE_GRANTS_BLOB"
 
-      - name: Validate live Databricks access vs manifest
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
-        shell: bash
-        run: |
-          python "$GITHUB_WORKSPACE/uda/scripts/object-access/validate_live_access.py" \
-            --manifest-json "$REQUEST_TFVARS_JSON" \
-            --databricks-host "$DATABRICKS_HOST" \
-            --fail-on-missing
-
       - name: Publish plan outputs
         if: ${{ always() && steps.prep_paths.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -564,4 +555,112 @@ jobs:
             if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
               echo "- Add plan text: $TFPLAN_MIXED_ADD_TXT"
             fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  post-validate-object-access:
+    needs: [detect-templates, plan-object-access]
+    if: ${{ needs.plan-object-access.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply)) }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.detect-templates.outputs.matrix) }}
+
+    env:
+      TEMPLATE_FILE: ${{ matrix.template_file }}
+      OUTPUT_ROOT: uda/output/object-access
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Azure login
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          creds: |
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
+
+      - name: Load Databricks secrets from Key Vault
+        shell: bash
+        run: |
+          KV="${{ secrets.KEYVAULT_NAME }}"
+
+          get_kv_secret() {
+            local out_var="$1"
+            local secret_name="$2"
+            local value
+            value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
+            if [ -z "$value" ]; then
+              echo "Missing Key Vault secret: $secret_name" >&2
+              exit 1
+            fi
+            printf -v "$out_var" '%s' "$value"
+          }
+
+          get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST
+          DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
+          get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID
+          get_kv_secret DATABRICKS_OAUTH_SECRET_VALUE DB-OAUTH-SECRET
+
+          echo "::add-mask::$DATABRICKS_OAUTH_SECRET_VALUE"
+          echo "DB_OAUTH_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
+          echo "DB_OAUTH_CLIENT_SECRET=$DATABRICKS_OAUTH_SECRET_VALUE" >> "$GITHUB_ENV"
+          echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: uda/scripts/object-access/requirements-ci.txt
+
+      - name: Prepare post-validation path
+        shell: bash
+        run: |
+          template_name="$(basename "$TEMPLATE_FILE")"
+          request_id="${template_name%.*}"
+          output_dir="$OUTPUT_ROOT/$request_id"
+          echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
+          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
+          echo "REQUEST_TFVARS_JSON=$output_dir/object-access-request.tfvars.json" >> "$GITHUB_ENV"
+
+      - name: Download plan artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b9157f96f9f5f0f2d7b9d7d8 # v4.6.0
+        with:
+          name: uda-dbx-object-access-plan-output-${{ env.REQUEST_ID }}
+          path: ${{ env.OUTPUT_DIR }}
+
+      - name: Determine request activity from downloaded artifact
+        shell: bash
+        run: |
+          REQUEST_ACTIVITY="$(python "$GITHUB_WORKSPACE/uda/scripts/object-access/determine_request_activity.py" --tfvars-json "$REQUEST_TFVARS_JSON")"
+          echo "REQUEST_ACTIVITY=$REQUEST_ACTIVITY" >> "$GITHUB_ENV"
+
+      - name: Validate live Databricks access vs request
+        shell: bash
+        run: |
+          if [ "${REQUEST_ACTIVITY:-}" = "REMOVE" ]; then
+            echo "Skipping live validation for REMOVE request because the grant is expected to be absent after revoke."
+            exit 0
+          fi
+
+          python "$GITHUB_WORKSPACE/uda/scripts/object-access/validate_live_access.py" \
+            --manifest-json "$REQUEST_TFVARS_JSON" \
+            --databricks-host "$DATABRICKS_HOST" \
+            --fail-on-missing
+
+      - name: Write validation summary
+        if: always()
+        run: |
+          {
+            echo "## Post Validation Result"
+            echo "- Template file: $TEMPLATE_FILE"
+            echo "- Output dir: $OUTPUT_DIR"
+            echo "- Request activity: $REQUEST_ACTIVITY"
           } >> "$GITHUB_STEP_SUMMARY"

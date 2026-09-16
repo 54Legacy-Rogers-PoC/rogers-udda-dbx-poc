@@ -145,16 +145,19 @@ def test_fetch_databricks_grants_preserves_requested_object_identity(monkeypatch
     assert live == {"VIEW|edl_prod|vw_schema|employee_data|abeer@54legacy.com|SELECT"}
 
 
-def test_object_access_workflow_validates_current_request_only() -> None:
+def test_object_access_workflow_moves_validate_to_post_job() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     workflow_path = repo_root / ".github" / "workflows" / "uda-dbx-object-access.yml"
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
 
-    validation_steps = workflow["jobs"]["plan-object-access"]["steps"]
-    validate_step = next(
-        step for step in validation_steps if step.get("name") == "Validate live Databricks access vs manifest"
-    )
-    run = validate_step["run"]
+    plan_steps = workflow["jobs"]["plan-object-access"]["steps"]
+    assert all(step.get("name") != "Validate live Databricks access vs manifest" for step in plan_steps)
 
-    assert '--manifest-json "$REQUEST_TFVARS_JSON"' in run
-    assert '--manifest-json "$TFVARS_JSON"' not in run
+    post_job = workflow["jobs"]["post-validate-object-access"]
+    validate_run = next(
+        step for step in post_job["steps"] if step.get("name") == "Validate live Databricks access vs request"
+    )["run"]
+
+    assert 'if [ "${REQUEST_ACTIVITY:-}" = "REMOVE" ]; then' in validate_run
+    assert 'Skipping live validation for REMOVE request because the grant is expected to be absent after revoke.' in validate_run
+    assert '--manifest-json "$REQUEST_TFVARS_JSON"' in validate_run
