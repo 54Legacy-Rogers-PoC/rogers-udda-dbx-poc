@@ -620,6 +620,10 @@ jobs:
           cache: pip
           cache-dependency-path: uda/scripts/object-access/requirements-ci.txt
 
+      - name: Install workflow dependencies
+        run: |
+          pip install --only-binary=:all: requests==2.32.3
+
       - name: Prepare post-validation path
         shell: bash
         run: |
