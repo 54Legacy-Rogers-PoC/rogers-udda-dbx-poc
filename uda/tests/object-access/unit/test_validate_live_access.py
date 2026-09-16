@@ -145,19 +145,72 @@ def test_fetch_databricks_grants_preserves_requested_object_identity(monkeypatch
     assert live == {"VIEW|edl_prod|vw_schema|employee_data|abeer@54legacy.com|SELECT"}
 
 
-def test_object_access_workflow_moves_validate_to_post_job() -> None:
+def test_object_access_workflow_validates_remove_requests_for_absence() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     workflow_path = repo_root / ".github" / "workflows" / "uda-dbx-object-access.yml"
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-
-    plan_steps = workflow["jobs"]["plan-object-access"]["steps"]
-    assert all(step.get("name") != "Validate live Databricks access vs manifest" for step in plan_steps)
 
     post_job = workflow["jobs"]["post-validate-object-access"]
     validate_run = next(
         step for step in post_job["steps"] if step.get("name") == "Validate live Databricks access vs request"
     )["run"]
 
+    assert '--expect-absent' in validate_run
     assert 'if [ "${REQUEST_ACTIVITY:-}" = "REMOVE" ]; then' in validate_run
-    assert 'Skipping live validation for REMOVE request because the grant is expected to be absent after revoke.' in validate_run
     assert '--manifest-json "$REQUEST_TFVARS_JSON"' in validate_run
+
+
+def test_expect_absent_flags_failed_when_grant_still_exists(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    manifest = {
+        "object_access_records": [{
+            "object_type": "VIEW",
+            "catalog_name": "edl_prod",
+            "schema_name": "vw_schema",
+            "object_name": "vw_oooo",
+            "principal_name": "furqan@54legacy.com",
+            "privilege": "SELECT",
+        }]
+    }
+
+    monkeypatch.setattr(validator, "_fetch_databricks_grants", lambda *_args, **_kwargs: {
+        "VIEW|edl_prod|vw_schema|vw_oooo|furqan@54legacy.com|SELECT"
+    })
+
+    exit_code = validator.validate_manifest(
+        manifest,
+        "https://example.cloud.databricks.com",
+        "token",
+        fail_on_missing=False,
+        expect_absent=True,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "EXTRA|VIEW|edl_prod|vw_schema|vw_oooo|furqan@54legacy.com|SELECT" in captured.out
+
+
+def test_expect_absent_passes_when_grant_already_absent(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    manifest = {
+        "object_access_records": [{
+            "object_type": "VIEW",
+            "catalog_name": "edl_prod",
+            "schema_name": "vw_schema",
+            "object_name": "vw_oooo",
+            "principal_name": "furqan@54legacy.com",
+            "privilege": "SELECT",
+        }]
+    }
+
+    monkeypatch.setattr(validator, "_fetch_databricks_grants", lambda *_args, **_kwargs: set())
+
+    exit_code = validator.validate_manifest(
+        manifest,
+        "https://example.cloud.databricks.com",
+        "token",
+        fail_on_missing=False,
+        expect_absent=True,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "absent as expected" in captured.out

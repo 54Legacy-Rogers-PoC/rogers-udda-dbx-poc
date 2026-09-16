@@ -187,21 +187,14 @@ def _fetch_databricks_grants(host: str, token: str, desired_records: list[dict[s
     return live
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate Databricks live grants against manifest")
-    parser.add_argument("--manifest-json", required=True)
-    parser.add_argument("--databricks-host", required=True)
-    parser.add_argument("--databricks-token", default="")
-    parser.add_argument("--fail-on-missing", action="store_true")
-    args = parser.parse_args()
-
-    manifest_path = Path(args.manifest_json)
-    try:
-        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"Unable to read manifest JSON: {exc}", file=sys.stderr)
-        return 2
-
+def validate_manifest(
+    manifest_payload: dict[str, Any],
+    databricks_host: str,
+    databricks_token: str,
+    *,
+    fail_on_missing: bool = False,
+    expect_absent: bool = False,
+) -> int:
     records = manifest_payload.get("object_access_records", [])
     if not isinstance(records, list):
         print("Manifest does not contain an object_access_records list.", file=sys.stderr)
@@ -209,13 +202,21 @@ def main() -> int:
 
     desired = _manifest_keys(manifest_payload)
     try:
-        token = args.databricks_token
-        if not token:
-            token = get_databricks_token(args.databricks_host)
-        live = _fetch_databricks_grants(args.databricks_host, token, records)
+        token = databricks_token or get_databricks_token(databricks_host)
+        live = _fetch_databricks_grants(databricks_host, token, records)
     except Exception as exc:  # pylint: disable=broad-except
         print(f"Databricks validation failed: {exc}", file=sys.stderr)
         return 2
+
+    if expect_absent:
+        remaining = sorted(desired & live)
+        if not remaining:
+            print("Live Databricks grants are absent as expected for this REMOVE request.")
+            return 0
+        for key in remaining:
+            print(f"EXTRA|{key}")
+        print("Validation failed because revoke targets are still present in Databricks.", file=sys.stderr)
+        return 1
 
     missing = sorted(desired - live)
     extra = sorted(live - desired)
@@ -229,11 +230,36 @@ def main() -> int:
     for key in sorted(extra):
         print(f"EXTRA|{key}")
 
-    if args.fail_on_missing and missing:
+    if fail_on_missing and missing:
         print("Validation failed because required grant keys are missing from Databricks.", file=sys.stderr)
         return 1
 
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate Databricks live grants against manifest")
+    parser.add_argument("--manifest-json", required=True)
+    parser.add_argument("--databricks-host", required=True)
+    parser.add_argument("--databricks-token", default="")
+    parser.add_argument("--fail-on-missing", action="store_true")
+    parser.add_argument("--expect-absent", action="store_true")
+    args = parser.parse_args()
+
+    manifest_path = Path(args.manifest_json)
+    try:
+        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Unable to read manifest JSON: {exc}", file=sys.stderr)
+        return 2
+
+    return validate_manifest(
+        manifest_payload,
+        args.databricks_host,
+        args.databricks_token,
+        fail_on_missing=args.fail_on_missing,
+        expect_absent=args.expect_absent,
+    )
 
 
 if __name__ == "__main__":

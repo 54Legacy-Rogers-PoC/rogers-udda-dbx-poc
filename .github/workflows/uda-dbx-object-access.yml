@@ -650,8 +650,11 @@ jobs:
         shell: bash
         run: |
           if [ "${REQUEST_ACTIVITY:-}" = "REMOVE" ]; then
-            echo "Skipping live validation for REMOVE request because the grant is expected to be absent after revoke."
-            exit 0
+            python "$GITHUB_WORKSPACE/uda/scripts/object-access/validate_live_access.py" \
+              --manifest-json "$REQUEST_TFVARS_JSON" \
+              --databricks-host "$DATABRICKS_HOST" \
+              --expect-absent
+            exit $?
           fi
 
           python "$GITHUB_WORKSPACE/uda/scripts/object-access/validate_live_access.py" \
