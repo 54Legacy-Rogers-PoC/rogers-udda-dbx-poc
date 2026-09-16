@@ -80,3 +80,32 @@ def test_state_bootstrap_preserves_managed_grant() -> None:
     result = merger.merge_active_grants(_payload(_record("vw_vvvvv")), {}, state)
 
     assert [record["object_name"] for record in result["object_access_records"]] == ["vw_b", "vw_vvvvv"]
+
+
+def test_state_bootstrap_expands_grouped_resource_privileges() -> None:
+    state = {
+        "values": {
+            "root_module": {
+                "child_modules": [
+                    {
+                        "resources": [
+                            {
+                                "type": "databricks_grant",
+                                "index": "PRD|ad_group|abeer@54legacy.com|VIEW|edl_prod|vw_schema|vw_b",
+                                "values": {"privileges": ["SELECT", "MODIFY"]},
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+
+    result = merger.merge_active_grants(_payload(_record("vw_vvvvv")), {}, state)
+
+    recovered = [
+        record["privilege"]
+        for record in result["object_access_records"]
+        if record["object_name"] == "vw_b"
+    ]
+    assert recovered == ["MODIFY", "SELECT"]

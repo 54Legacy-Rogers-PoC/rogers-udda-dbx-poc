@@ -57,28 +57,39 @@ def _state_records(state_payload: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             key = _normalize(resource.get("index"))
             parts = key.split("|")
-            if len(parts) != 8:
+            if len(parts) not in {7, 8}:
                 continue
-            env, access_for, principal, object_type, catalog, schema, object_name, privilege = parts
-            records.append(
-                {
-                    "record_id": f"state-{key}",
-                    "activity": "ADD",
-                    "environment": env,
-                    "access_for": access_for,
-                    "principal_name": principal,
-                    "object_type": object_type,
-                    "catalog": catalog,
-                    "schema": schema,
-                    "object_name": object_name,
-                    "folder_path": "",
-                    "privilege": privilege,
-                    "privileges": [privilege],
-                    "justification": "Recovered from Terraform state",
-                    "additional_information": "",
-                    "row_number": 0,
-                }
-            )
+            env, access_for, principal, object_type, catalog, schema, object_name = parts[:7]
+            if len(parts) == 8:
+                privileges = [parts[7]]
+            else:
+                values = resource.get("values", {})
+                raw_privileges = values.get("privileges", []) if isinstance(values, dict) else []
+                privileges = raw_privileges if isinstance(raw_privileges, list) else []
+
+            for privilege in privileges:
+                normalized_privilege = _normalize(privilege).upper()
+                if not normalized_privilege:
+                    continue
+                records.append(
+                    {
+                        "record_id": f"state-{key}-{normalized_privilege}",
+                        "activity": "ADD",
+                        "environment": env,
+                        "access_for": access_for,
+                        "principal_name": principal,
+                        "object_type": object_type,
+                        "catalog": catalog,
+                        "schema": schema,
+                        "object_name": object_name,
+                        "folder_path": "",
+                        "privilege": normalized_privilege,
+                        "privileges": [normalized_privilege],
+                        "justification": "Recovered from Terraform state",
+                        "additional_information": "",
+                        "row_number": 0,
+                    }
+                )
     return records
 
 

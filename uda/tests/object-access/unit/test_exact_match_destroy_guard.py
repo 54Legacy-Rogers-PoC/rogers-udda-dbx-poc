@@ -77,3 +77,46 @@ def test_guard_blocks_different_key_destroy() -> None:
 def test_guard_extracts_exact_key_for_address() -> None:
     address = 'module.object_access.databricks_grant.view_add["PRD|ad_group|abeer@54legacy.com|VIEW|edl_prod|vw_schema|vw_vvvvv|SELECT"]'
     assert guard._resource_key_from_address(address) == "PRD|ad_group|abeer@54legacy.com|VIEW|edl_prod|vw_schema|vw_vvvvv|SELECT"
+
+
+def test_guard_allows_grouped_destroy_requested_by_remove() -> None:
+    request = {
+        "object_access_records": [
+            {
+                "activity": "REMOVE",
+                "environment": "PRD",
+                "access_for": "ad_group",
+                "principal_name": "abeer@54legacy.com",
+                "object_type": "VIEW",
+                "catalog": "edl_prod",
+                "schema": "vw_schema",
+                "object_name": "vw_vvvvv",
+                "privilege": "SELECT",
+            }
+        ]
+    }
+    plan = {
+        "resource_changes": [
+            {
+                "address": 'module.object_access.databricks_grant.view_add["PRD|ad_group|abeer@54legacy.com|VIEW|edl_prod|vw_schema|vw_vvvvv"]',
+                "change": {"actions": ["delete"]},
+            }
+        ]
+    }
+
+    assert guard.disallowed_destroy_keys({"object_access_records": []}, plan, request) == []
+
+
+def test_guard_blocks_unrequested_grouped_destroy() -> None:
+    plan = {
+        "resource_changes": [
+            {
+                "address": 'module.object_access.databricks_grant.view_add["PRD|ad_group|abeer@54legacy.com|VIEW|edl_prod|vw_schema|unrelated"]',
+                "change": {"actions": ["delete"]},
+            }
+        ]
+    }
+
+    assert guard.disallowed_destroy_keys({"object_access_records": []}, plan, {}) == [
+        "PRD|ad_group|abeer@54legacy.com|VIEW|edl_prod|vw_schema|unrelated"
+    ]

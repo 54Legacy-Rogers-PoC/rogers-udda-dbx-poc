@@ -17,7 +17,7 @@ def _normalize(value: Any) -> str:
     return str(value).strip()
 
 
-def _record_key(record: dict[str, Any]) -> str:
+def _record_key(record: dict[str, Any], *, include_privilege: bool = True) -> str:
     env = _normalize(record.get("environment")).upper()
     access_for = _normalize(record.get("access_for") or record.get("principal_type")).lower()
     principal_name = _normalize(record.get("principal_name")).lower()
@@ -26,7 +26,10 @@ def _record_key(record: dict[str, Any]) -> str:
     schema = _normalize(record.get("schema_name") or record.get("schema")).lower()
     object_name = _normalize(record.get("object_name")).lower()
     privilege = _normalize(record.get("privilege")).upper()
-    return f"{env}|{access_for}|{principal_name}|{obj_type}|{catalog}|{schema}|{object_name}|{privilege}"
+    parts = [env, access_for, principal_name, obj_type, catalog, schema, object_name]
+    if include_privilege:
+        parts.append(privilege)
+    return "|".join(parts)
 
 
 def _resource_key_from_address(address: str) -> str:
@@ -36,15 +39,32 @@ def _resource_key_from_address(address: str) -> str:
     return match.group(1)
 
 
-def _current_exact_keys(tfvars_payload: dict[str, Any]) -> set[str]:
+def _current_resource_keys(tfvars_payload: dict[str, Any]) -> set[str]:
     records = tfvars_payload.get("object_access_records", [])
     if not isinstance(records, list):
         return set()
     keys: set[str] = set()
     for record in records:
         if isinstance(record, dict):
-            keys.add(_record_key(record))
+            keys.add(_record_key(record, include_privilege=False))
     return keys
+
+
+def _requested_remove_keys(request_payload: dict[str, Any]) -> set[str]:
+    records = request_payload.get("object_access_records", [])
+    if not isinstance(records, list):
+        return set()
+    return {
+        _record_key(record, include_privilege=False)
+        for record in records
+        if isinstance(record, dict)
+        and _normalize(record.get("activity")).upper() in {"REMOVE", "REVOKE"}
+    }
+
+
+def _grouped_resource_key(key: str) -> str:
+    parts = key.split("|")
+    return "|".join(parts[:7]) if len(parts) == 8 else key
 
 
 def _destroyed_resource_keys(plan_payload: dict[str, Any]) -> list[str]:
@@ -69,15 +89,21 @@ def _destroyed_resource_keys(plan_payload: dict[str, Any]) -> list[str]:
     return destroyed
 
 
-def disallowed_destroy_keys(tfvars_payload: dict[str, Any], plan_payload: dict[str, Any]) -> list[str]:
-    valid_keys = _current_exact_keys(tfvars_payload)
+def disallowed_destroy_keys(
+    tfvars_payload: dict[str, Any],
+    plan_payload: dict[str, Any],
+    request_payload: dict[str, Any] | None = None,
+) -> list[str]:
+    valid_keys = _current_resource_keys(tfvars_payload)
+    valid_keys |= _requested_remove_keys(request_payload or {})
     destroyed = _destroyed_resource_keys(plan_payload)
-    return [key for key in destroyed if key not in valid_keys]
+    return [key for key in destroyed if _grouped_resource_key(key) not in valid_keys]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Block destroy actions for resources whose exact key is not in the request")
     parser.add_argument("--tfvars-json", required=True, help="Current request tfvars JSON")
+    parser.add_argument("--request-json", help="Original request tfvars JSON containing REMOVE/REVOKE intent")
     parser.add_argument("--plan-json", required=True, help="Terraform plan JSON")
     return parser.parse_args()
 
@@ -109,7 +135,16 @@ def main() -> int:
         print("Exact-match guard requires object plan JSON payloads", file=sys.stderr)
         return 2
 
-    blocked = disallowed_destroy_keys(tfvars_payload, plan_payload)
+    request_payload: dict[str, Any] = {}
+    if args.request_json:
+        try:
+            with Path(args.request_json).open("r", encoding="utf-8") as handle:
+                request_payload = json.load(handle)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"Exact-match guard failed to read request JSON: {exc}", file=sys.stderr)
+            return 2
+
+    blocked = disallowed_destroy_keys(tfvars_payload, plan_payload, request_payload)
     if blocked:
         print("Exact-match destroy guard found unsafe destroy actions:", file=sys.stderr)
         for key in blocked:

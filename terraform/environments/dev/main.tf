@@ -15,39 +15,48 @@ locals {
         upper(r.object_type != null && r.object_type != "" ? r.object_type : ""),
         lower(r.catalog_name != null && r.catalog_name != "" ? r.catalog_name : (r.catalog != null && r.catalog != "" ? r.catalog : "")),
         lower(r.schema_name != null && r.schema_name != "" ? r.schema_name : (r.schema != null && r.schema != "" ? r.schema : "")),
-        lower(r.object_name != null && r.object_name != "" ? r.object_name : ""),
-        upper(r.privilege != null && r.privilege != "" ? r.privilege : "")
+        lower(r.object_name != null && r.object_name != "" ? r.object_name : "")
       ])
-      activity = upper(try(r.activity, ""))
-      object_type = lower(try(r.object_type, ""))
+      activity       = upper(try(r.activity, ""))
+      object_type    = lower(try(r.object_type, ""))
       principal_type = r.principal_type != null && r.principal_type != "" ? r.principal_type : (r.access_for != null && r.access_for != "" ? r.access_for : "")
       principal_name = r.principal_name != null ? r.principal_name : ""
-      catalog_name = r.catalog_name != null && r.catalog_name != "" ? r.catalog_name : (r.catalog != null && r.catalog != "" ? r.catalog : "")
-      schema_name = r.schema_name != null && r.schema_name != "" ? r.schema_name : (r.schema != null && r.schema != "" ? r.schema : "")
-      object_name = r.object_name != null ? r.object_name : ""
-      folder_path = r.folder_path != null ? r.folder_path : ""
-      privileges = r.privileges != null ? r.privileges : (r.privilege != null && r.privilege != "" ? [r.privilege] : [])
-      justification = r.justification != null ? r.justification : ""
+      catalog_name   = r.catalog_name != null && r.catalog_name != "" ? r.catalog_name : (r.catalog != null && r.catalog != "" ? r.catalog : "")
+      schema_name    = r.schema_name != null && r.schema_name != "" ? r.schema_name : (r.schema != null && r.schema != "" ? r.schema : "")
+      object_name    = r.object_name != null ? r.object_name : ""
+      folder_path    = r.folder_path != null ? r.folder_path : ""
+      privileges     = r.privileges != null ? r.privileges : (r.privilege != null && r.privilege != "" ? [r.privilege] : [])
+      justification  = r.justification != null ? r.justification : ""
     }
   ]
 
+  normalized_record_groups = {
+    for r in local.normalized_records : r.resource_key => r...
+  }
+
+  grouped_records = {
+    for key, records in local.normalized_record_groups : key => merge(records[0], {
+      privileges = sort(distinct(flatten([for record in records : record.privileges])))
+    })
+  }
+
   catalog_records = {
-    for r in local.normalized_records : r.resource_key => r
+    for key, r in local.grouped_records : key => r
     if r.resource_key != "" && r.object_type == "catalog"
   }
 
   schema_records = {
-    for r in local.normalized_records : r.resource_key => r
+    for key, r in local.grouped_records : key => r
     if r.resource_key != "" && r.object_type == "schema"
   }
 
   view_records = {
-    for r in local.normalized_records : r.resource_key => r
+    for key, r in local.grouped_records : key => r
     if r.resource_key != "" && r.object_type == "view"
   }
 
   folder_records = {
-    for r in local.normalized_records : r.resource_key => r
+    for key, r in local.grouped_records : key => r
     if r.resource_key != "" && r.object_type == "folder"
   }
 
@@ -130,19 +139,19 @@ module "schema_creation" {
 
   source = "../../modules/schema_creation"
 
-  request_id                             = var.request_id
-  environment                            = var.environment
-  sandbox_mode                           = var.sandbox_mode
-  sandbox_schema_name                    = var.sandbox_schema_name
-  sandbox_owner_name                     = var.sandbox_owner_name
+  request_id                              = var.request_id
+  environment                             = var.environment
+  sandbox_mode                            = var.sandbox_mode
+  sandbox_schema_name                     = var.sandbox_schema_name
+  sandbox_owner_name                      = var.sandbox_owner_name
   default_external_location_rw_principals = var.default_external_location_rw_principals
-  create_communitymart_schema            = var.create_communitymart_schema
-  communitymart_schema_name              = var.communitymart_schema_name
-  communitymart_owner_name               = var.communitymart_owner_name
-  justification                          = var.justification
-  additional_information                 = var.additional_information
-  assignment_group                       = var.assignment_group
-  epdg_ticket_url                        = var.epdg_ticket_url
-  governance_approval_required           = var.governance_approval_required
-  ad_approval_required                   = var.ad_approval_required
+  create_communitymart_schema             = var.create_communitymart_schema
+  communitymart_schema_name               = var.communitymart_schema_name
+  communitymart_owner_name                = var.communitymart_owner_name
+  justification                           = var.justification
+  additional_information                  = var.additional_information
+  assignment_group                        = var.assignment_group
+  epdg_ticket_url                         = var.epdg_ticket_url
+  governance_approval_required            = var.governance_approval_required
+  ad_approval_required                    = var.ad_approval_required
 }

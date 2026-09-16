@@ -28,16 +28,15 @@ def _build_target(record: dict) -> tuple[str, str] | None:
     catalog = _normalize(record.get("catalog_name") or record.get("catalog")).lower()
     schema = _normalize(record.get("schema_name") or record.get("schema")).lower()
     object_name = _normalize(record.get("object_name")).lower()
-    privilege = _normalize(record.get("privilege")).upper()
 
     if obj_type == "CATALOG":
-        target = f'module.object_access.databricks_grant.catalog_add["{env}|{access_for}|{principal_key}|CATALOG|{catalog}|{privilege}"]'
+        target = f'module.object_access.databricks_grant.catalog_add["{env}|{access_for}|{principal_key}|CATALOG|{catalog}||"]'
         import_id = f"catalog/{catalog}/{principal_name}"
     elif obj_type == "SCHEMA":
-        target = f'module.object_access.databricks_grant.schema_add["{env}|{access_for}|{principal_key}|SCHEMA|{catalog}|{schema}|{privilege}"]'
+        target = f'module.object_access.databricks_grant.schema_add["{env}|{access_for}|{principal_key}|SCHEMA|{catalog}|{schema}|"]'
         import_id = f"schema/{catalog}.{schema}/{principal_name}"
     elif obj_type == "VIEW":
-        target = f'module.object_access.databricks_grant.view_add["{env}|{access_for}|{principal_key}|VIEW|{catalog}|{schema}|{object_name}|{privilege}"]'
+        target = f'module.object_access.databricks_grant.view_add["{env}|{access_for}|{principal_key}|VIEW|{catalog}|{schema}|{object_name}"]'
         import_id = f"table/{catalog}.{schema}.{object_name}/{principal_name}"
     else:
         return None
@@ -46,13 +45,13 @@ def _build_target(record: dict) -> tuple[str, str] | None:
 
 
 def build_revoke_targets(payload: dict) -> list[str]:
-    rows: list[str] = []
+    rows: set[str] = set()
     for record in payload.get("object_access_records", []):
         built = _build_target(record)
         if built is not None:
             target, import_id = built
-            rows.append(f"{target}\t{import_id}")
-    return rows
+            rows.add(f"{target}\t{import_id}")
+    return sorted(rows)
 
 
 def parse_args() -> argparse.Namespace:

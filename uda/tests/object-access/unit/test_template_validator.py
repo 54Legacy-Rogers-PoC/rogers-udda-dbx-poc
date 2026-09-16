@@ -134,6 +134,21 @@ def test_invalid_enum_returns_tpl_004(tmp_path: Path) -> None:
 	assert "TPL-004" in _error_codes(errors)
 
 
+def test_folder_requests_are_rejected_until_folder_acl_lifecycle_is_supported(tmp_path: Path) -> None:
+	template_file = tmp_path / "ObjectAccessTemplate.xlsx"
+	row = _valid_row()
+	row[5] = "FOLDER"
+	row[6] = ""
+	row[7] = ""
+	row[9] = "/Shared/Finance"
+	row[10] = "READ"
+	_write_template(template_file, [row])
+
+	errors = validator.validate_template_file(template_file=template_file)
+
+	assert "TPL-004" in _error_codes(errors)
+
+
 def test_conditional_violation_returns_tpl_005(tmp_path: Path) -> None:
 	template_file = tmp_path / "ObjectAccessTemplate.xlsx"
 	row = _valid_row()

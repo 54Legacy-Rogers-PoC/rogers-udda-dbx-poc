@@ -194,6 +194,7 @@ def validate_manifest(
     *,
     fail_on_missing: bool = False,
     expect_absent: bool = False,
+    respect_activity: bool = False,
 ) -> int:
     records = manifest_payload.get("object_access_records", [])
     if not isinstance(records, list):
@@ -217,6 +218,31 @@ def validate_manifest(
             print(f"EXTRA|{key}")
         print("Validation failed because revoke targets are still present in Databricks.", file=sys.stderr)
         return 1
+
+    if respect_activity:
+        present_records = [
+            record for record in records
+            if isinstance(record, dict)
+            and _normalize(record.get("activity") or "ADD").upper() == "ADD"
+        ]
+        absent_records = [
+            record for record in records
+            if isinstance(record, dict)
+            and _normalize(record.get("activity")).upper() in {"REMOVE", "REVOKE"}
+        ]
+        expected_present = {_object_key(record) for record in present_records}
+        expected_absent = {_object_key(record) for record in absent_records}
+        missing = sorted(expected_present - live)
+        remaining = sorted(expected_absent & live)
+        for key in missing:
+            print(f"MISSING|{key}")
+        for key in remaining:
+            print(f"EXTRA|{key}")
+        if missing or remaining:
+            print("Validation failed because the live grants do not match request activities.", file=sys.stderr)
+            return 1
+        print("Live Databricks grants match the requested ADD and REMOVE activities.")
+        return 0
 
     missing = sorted(desired - live)
     extra = sorted(live - desired)
@@ -244,6 +270,7 @@ def main() -> int:
     parser.add_argument("--databricks-token", default="")
     parser.add_argument("--fail-on-missing", action="store_true")
     parser.add_argument("--expect-absent", action="store_true")
+    parser.add_argument("--respect-activity", action="store_true")
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest_json)
@@ -259,6 +286,7 @@ def main() -> int:
         args.databricks_token,
         fail_on_missing=args.fail_on_missing,
         expect_absent=args.expect_absent,
+        respect_activity=args.respect_activity,
     )
 
 

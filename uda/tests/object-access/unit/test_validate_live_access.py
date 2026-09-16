@@ -145,7 +145,7 @@ def test_fetch_databricks_grants_preserves_requested_object_identity(monkeypatch
     assert live == {"VIEW|edl_prod|vw_schema|employee_data|abeer@54legacy.com|SELECT"}
 
 
-def test_object_access_workflow_validates_remove_requests_for_absence() -> None:
+def test_object_access_workflow_validates_request_activities() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     workflow_path = repo_root / ".github" / "workflows" / "uda-dbx-object-access.yml"
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
@@ -155,8 +155,7 @@ def test_object_access_workflow_validates_remove_requests_for_absence() -> None:
         step for step in post_job["steps"] if step.get("name") == "Validate live Databricks access vs request"
     )["run"]
 
-    assert '--expect-absent' in validate_run
-    assert 'if [ "${REQUEST_ACTIVITY:-}" = "REMOVE" ]; then' in validate_run
+    assert "--respect-activity" in validate_run
     assert '--manifest-json "$REQUEST_TFVARS_JSON"' in validate_run
 
 
@@ -214,3 +213,43 @@ def test_expect_absent_passes_when_grant_already_absent(monkeypatch: pytest.Monk
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "absent as expected" in captured.out
+
+
+def test_respect_activity_validates_mixed_request(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    manifest = {
+        "object_access_records": [
+            {
+                "activity": "ADD",
+                "object_type": "VIEW",
+                "catalog": "catalog_a",
+                "schema": "schema_a",
+                "object_name": "kept_view",
+                "principal_name": "team",
+                "privilege": "SELECT",
+            },
+            {
+                "activity": "REMOVE",
+                "object_type": "VIEW",
+                "catalog": "catalog_a",
+                "schema": "schema_a",
+                "object_name": "removed_view",
+                "principal_name": "team",
+                "privilege": "SELECT",
+            },
+        ]
+    }
+    monkeypatch.setattr(
+        validator,
+        "_fetch_databricks_grants",
+        lambda *_args, **_kwargs: {"VIEW|catalog_a|schema_a|kept_view|team|SELECT"},
+    )
+
+    exit_code = validator.validate_manifest(
+        manifest,
+        "https://example.cloud.databricks.com",
+        "token",
+        respect_activity=True,
+    )
+
+    assert exit_code == 0
+    assert "match the requested ADD and REMOVE activities" in capsys.readouterr().out

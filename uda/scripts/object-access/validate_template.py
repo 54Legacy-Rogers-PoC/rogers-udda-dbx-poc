@@ -44,7 +44,7 @@ OPTIONAL_COLUMNS = ["Record_ID", "Activity", "Folder_Path", "Privilege", "Justif
 ALLOWED_ACTIVITY = {"ADD", "REMOVE", "REVOKE"}
 ALLOWED_ENV = {"DEV", "QA", "PRD"}
 ALLOWED_ACCESS_FOR = {"ad_group", "service_account"}
-ALLOWED_OBJECT_TYPES = {"CATALOG", "SCHEMA", "VIEW", "FOLDER"}
+ALLOWED_OBJECT_TYPES = {"CATALOG", "SCHEMA", "VIEW"}
 
 ALLOWED_PRIVILEGES = {
 	"CATALOG": {"USE_CATALOG"},

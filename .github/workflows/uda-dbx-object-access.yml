@@ -204,8 +204,6 @@ jobs:
           echo "TERRAFORM_STATE_JSON=$output_dir/terraform-state.json" >> "$GITHUB_ENV"
           echo "TFPLAN_BIN=$output_dir/object-access.tfplan" >> "$GITHUB_ENV"
           echo "TFPLAN_TXT=$output_dir/object-access-plan.txt" >> "$GITHUB_ENV"
-          echo "TFPLAN_MIXED_ADD_BIN=$output_dir/object-access-add.tfplan" >> "$GITHUB_ENV"
-          echo "TFPLAN_MIXED_ADD_TXT=$output_dir/object-access-add-plan.txt" >> "$GITHUB_ENV"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
           echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
 
@@ -278,18 +276,30 @@ jobs:
       - name: Build persistent active-grants manifest
         shell: bash
         run: |
+          set -euo pipefail
           environment_name="$(jq -r '.environment | ascii_downcase' "$REQUEST_TFVARS_JSON")"
           manifest_blob="object-access/manifests/${environment_name}.json"
           echo "ACTIVE_GRANTS_BLOB=$manifest_blob" >> "$GITHUB_ENV"
 
-          if ! az storage blob download \
+          manifest_exists="$(az storage blob exists \
             --account-name "$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
             --container-name "$TF_BACKEND_CONTAINER_NAME" \
             --name "$manifest_blob" \
-            --file "$ACTIVE_GRANTS_MANIFEST" \
             --account-key "$TF_BACKEND_ACCESS_KEY" \
-            --overwrite true \
-            --only-show-errors; then
+            --query exists \
+            --output tsv \
+            --only-show-errors)"
+
+          if [ "$manifest_exists" = "true" ]; then
+            az storage blob download \
+              --account-name "$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
+              --container-name "$TF_BACKEND_CONTAINER_NAME" \
+              --name "$manifest_blob" \
+              --file "$ACTIVE_GRANTS_MANIFEST" \
+              --account-key "$TF_BACKEND_ACCESS_KEY" \
+              --overwrite true \
+              --only-show-errors
+          else
             echo '{}' > "$ACTIVE_GRANTS_MANIFEST"
             echo "No persistent manifest found; bootstrapping from Terraform state."
           fi
@@ -305,235 +315,89 @@ jobs:
             --state-json "$TERRAFORM_STATE_JSON" \
             --output-json "$TFVARS_JSON"
 
+      - name: Migrate legacy grant state addresses
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform -chdir="$TF_WORKDIR" state list > "$OUTPUT_DIR/terraform-state-list.txt"
+          python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_state_migrations.py" \
+            --state-list "$OUTPUT_DIR/terraform-state-list.txt" \
+            --output-tsv "$OUTPUT_DIR/state-migrations.tsv"
+
+          while IFS=$'\t' read -r old_address new_address; do
+            if [ -z "$old_address" ] || [ -z "$new_address" ]; then
+              continue
+            fi
+            if terraform -chdir="$TF_WORKDIR" state list | grep -Fx -- "$new_address" >/dev/null; then
+              terraform -chdir="$TF_WORKDIR" state rm "$old_address"
+            else
+              terraform -chdir="$TF_WORKDIR" state mv "$old_address" "$new_address"
+            fi
+          done < "$OUTPUT_DIR/state-migrations.tsv"
+
+      - name: Import unmanaged revoke targets
+        if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply)) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$REQUEST_ACTIVITY" = "ADD" ]; then
+            echo "No revoke targets need import for an ADD-only request."
+            exit 0
+          fi
+
+          python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_revoke_targets.py" \
+            --input-json "$REQUEST_TFVARS_JSON" \
+            --output-tsv "$OUTPUT_DIR/revoke_targets.tsv"
+
+          while IFS=$'\t' read -r target import_id; do
+            if [ -z "$target" ] || [ -z "$import_id" ]; then
+              continue
+            fi
+            if terraform -chdir="$TF_WORKDIR" state list | grep -Fx -- "$target" >/dev/null; then
+              continue
+            fi
+            echo "Attempting import for unmanaged revoke target: $import_id"
+            if ! terraform -chdir="$TF_WORKDIR" import \
+              -var-file="$GITHUB_WORKSPACE/$TFVARS_IMPORT_JSON" \
+              "$target" "$import_id"; then
+              echo "Import did not succeed; post-validation will verify that the grant is already absent: $target"
+            fi
+          done < "$OUTPUT_DIR/revoke_targets.tsv"
+
+          terraform -chdir="$TF_WORKDIR" show -json > "$TERRAFORM_STATE_JSON"
+          python "$GITHUB_WORKSPACE/uda/scripts/object-access/merge_active_grants.py" \
+            --request-json "$REQUEST_TFVARS_JSON" \
+            --manifest-json "$ACTIVE_GRANTS_MANIFEST" \
+            --state-json "$TERRAFORM_STATE_JSON" \
+            --output-json "$TFVARS_JSON"
+
       - name: Terraform plan
         shell: bash
         run: |
-          if [ "$REQUEST_ACTIVITY" != "ADD" ]; then
-            declare -a TARGETS=()
-            declare -A TARGET_IMPORT_ID=()
-
-            python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_revoke_targets.py" \
-              --input-json "$REQUEST_TFVARS_JSON" \
-              --output-tsv "$OUTPUT_DIR/revoke_targets.tsv"
-
-            while IFS=$'\t' read -r target import_id; do
-              if [ -z "$target" ] || [ -z "$import_id" ]; then
-                continue
-              fi
-              TARGETS+=("$target")
-              TARGET_IMPORT_ID["$target"]="$import_id"
-            done < "$OUTPUT_DIR/revoke_targets.tsv"
-
-            if [ "${#TARGETS[@]}" -eq 0 ]; then
-              echo "No revoke targets found for REMOVE/REVOKE template." >&2
-              exit 1
-            fi
-
-            mapfile -t STATE_ADDRS < <(terraform -chdir="$TF_WORKDIR" state list || true)
-
-            target_args=()
-            missing_targets=()
-            for t in "${TARGETS[@]}"; do
-              echo "Revoke target: $t"
-              if ! printf '%s\n' "${STATE_ADDRS[@]}" | grep -Fx -- "$t" >/dev/null; then
-                import_id="${TARGET_IMPORT_ID[$t]:-}"
-                if [ -n "$import_id" ]; then
-                  echo "Target not in state. Attempting import for revoke: $import_id"
-                  if python "$GITHUB_WORKSPACE/uda/scripts/object-access/restore_missing_import_record.py" \
-                    --input-json "$REQUEST_TFVARS_JSON" \
-                    --output-json "$TFVARS_IMPORT_JSON" \
-                    --target "$t"; then
-                    echo "Recovered config entry for stale revoke target in import tfvars: $t"
-                  fi
-                  if terraform -chdir="$TF_WORKDIR" import -var-file="$GITHUB_WORKSPACE/$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
-                    echo "Imported missing target into state: $t"
-                    target_args+=("-target=$t")
-                    continue
-                  else
-                    echo "Import failed for target: $t"
-                  fi
-                fi
-                missing_targets+=("$t")
-                continue
-              fi
-              target_args+=("-target=$t")
-            done
-
-            if [ "${#missing_targets[@]}" -gt 0 ]; then
-              echo "Skipping revoke targets not found in backend state ($TF_BACKEND_KEY):"
-              printf ' - %s\n' "${missing_targets[@]}"
-              echo "Continuing with targets that are present in state."
-            fi
-
-            if [ "${#target_args[@]}" -eq 0 ]; then
-              if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
-                echo "REMOVE phase skipped: none of the requested revoke targets were present in state and import did not succeed for the current config."
-                echo "true" > "$OUTPUT_DIR/remove-phase-skipped.flag"
-              else
-                echo "No REMOVE targets available for MIXED template. Skipping REMOVE phase and continuing to ADD plan."
-                echo "true" > "$OUTPUT_DIR/remove-phase-skipped.flag"
-              fi
-            else
-              terraform -chdir="$TF_WORKDIR" plan \
-                -lock-timeout=10m \
-                -destroy \
-                -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
-                "${target_args[@]}" \
-                -out="$GITHUB_WORKSPACE/$TFPLAN_BIN"
-
-              terraform -chdir="$TF_WORKDIR" show -no-color "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$TFPLAN_TXT"
-            fi
-          else
-            terraform -chdir="$TF_WORKDIR" plan \
-              -lock-timeout=10m \
-              -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
-              -out="$GITHUB_WORKSPACE/$TFPLAN_BIN"
-
-            terraform -chdir="$TF_WORKDIR" show -no-color "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$TFPLAN_TXT"
-          fi
-
-          if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
-            echo "Generating ADD phase plan for MIXED activity template..."
-            terraform -chdir="$TF_WORKDIR" plan \
-              -lock-timeout=10m \
-              -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
-              -out="$GITHUB_WORKSPACE/$TFPLAN_MIXED_ADD_BIN"
-            terraform -chdir="$TF_WORKDIR" show -no-color "$GITHUB_WORKSPACE/$TFPLAN_MIXED_ADD_BIN" > "$TFPLAN_MIXED_ADD_TXT"
-          fi
+          terraform -chdir="$TF_WORKDIR" plan \
+            -lock-timeout=10m \
+            -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
+            -out="$GITHUB_WORKSPACE/$TFPLAN_BIN"
+          terraform -chdir="$TF_WORKDIR" show -no-color "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$TFPLAN_TXT"
 
       - name: Exact-match destroy guard
         shell: bash
         run: |
-          if [ "$REQUEST_ACTIVITY" = "ADD" ] && [ -f "$GITHUB_WORKSPACE/$TFPLAN_BIN" ]; then
-            terraform -chdir="$TF_WORKDIR" show -json "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$OUTPUT_DIR/terraform-plan.json"
-            python "$GITHUB_WORKSPACE/uda/scripts/object-access/guard_exact_match_destroy.py" \
-              --tfvars-json "$GITHUB_WORKSPACE/$TFVARS_JSON" \
-              --plan-json "$OUTPUT_DIR/terraform-plan.json"
-          else
-            echo "Exact-match ADD guard not required for $REQUEST_ACTIVITY."
-          fi
+          terraform -chdir="$TF_WORKDIR" show -json "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$OUTPUT_DIR/terraform-plan.json"
+          python "$GITHUB_WORKSPACE/uda/scripts/object-access/guard_exact_match_destroy.py" \
+            --tfvars-json "$GITHUB_WORKSPACE/$TFVARS_JSON" \
+            --request-json "$GITHUB_WORKSPACE/$REQUEST_TFVARS_JSON" \
+            --plan-json "$OUTPUT_DIR/terraform-plan.json"
 
       - name: Terraform apply
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         shell: bash
         run: |
-          set -euo pipefail
-
-          REMOVE_PHASE_SKIPPED="false"
-          if [ "$REQUEST_ACTIVITY" = "MIXED" ] && [ -f "$OUTPUT_DIR/remove-phase-skipped.flag" ]; then
-            REMOVE_PHASE_SKIPPED="true"
-            echo "REMOVE phase was skipped during planning for MIXED template."
-          fi
-
-          if [ "$REQUEST_ACTIVITY" = "MIXED" ] && [ "$REMOVE_PHASE_SKIPPED" = "true" ]; then
-            echo "Skipping REMOVE apply phase and proceeding directly to ADD phase."
-          else
-            if [ "$REQUEST_ACTIVITY" != "ADD" ]; then
-              declare -a TARGETS=()
-              declare -A TARGET_IMPORT_ID=()
-
-              python "$GITHUB_WORKSPACE/uda/scripts/object-access/build_revoke_targets.py" \
-                --input-json "$REQUEST_TFVARS_JSON" \
-                --output-tsv "$OUTPUT_DIR/revoke_targets.tsv"
-
-              while IFS=$'\t' read -r target import_id; do
-                if [ -z "$target" ] || [ -z "$import_id" ]; then
-                  continue
-                fi
-                TARGETS+=("$target")
-                TARGET_IMPORT_ID["$target"]="$import_id"
-              done < "$OUTPUT_DIR/revoke_targets.tsv"
-
-              if [ "${#TARGETS[@]}" -eq 0 ]; then
-                echo "No revoke targets found for REMOVE/REVOKE template." >&2
-                exit 1
-              fi
-
-              mapfile -t STATE_ADDRS < <(terraform -chdir="$TF_WORKDIR" state list || true)
-
-              target_args=()
-              missing_targets=()
-              for t in "${TARGETS[@]}"; do
-                if ! printf '%s\n' "${STATE_ADDRS[@]}" | grep -Fx -- "$t" >/dev/null; then
-                  import_id="${TARGET_IMPORT_ID[$t]:-}"
-                  if [ -n "$import_id" ]; then
-                    echo "Target not in state. Attempting import for revoke: $import_id"
-                    if terraform -chdir="$TF_WORKDIR" import -var-file="$GITHUB_WORKSPACE/$TFVARS_IMPORT_JSON" "$t" "$import_id"; then
-                      echo "Imported missing target into state: $t"
-                      target_args+=("-target=$t")
-                      continue
-                    else
-                      echo "Import failed for target: $t"
-                    fi
-                  fi
-                  missing_targets+=("$t")
-                  continue
-                fi
-                target_args+=("-target=$t")
-              done
-
-              if [ "${#missing_targets[@]}" -gt 0 ]; then
-                echo "Skipping revoke targets not found in backend state ($TF_BACKEND_KEY):"
-                printf ' - %s\n' "${missing_targets[@]}"
-                echo "Continuing with targets that are present in state."
-              fi
-
-              if [ "${#target_args[@]}" -eq 0 ]; then
-                if [ "$REQUEST_ACTIVITY" = "REMOVE" ]; then
-                  echo "REMOVE phase skipped: none of the requested revoke targets were present in state and import did not succeed for the current config."
-                  echo "true" > "$OUTPUT_DIR/remove-phase-skipped.flag"
-                else
-                  echo "No REMOVE targets available for MIXED template. Skipping REMOVE phase and continuing to ADD phase."
-                fi
-              else
-                terraform -chdir="$TF_WORKDIR" plan \
-                  -lock-timeout=10m \
-                  -destroy \
-                  -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
-                  "${target_args[@]}" \
-                  -out="$GITHUB_WORKSPACE/$TFPLAN_BIN"
-                terraform -chdir="$TF_WORKDIR" apply -lock-timeout=10m -auto-approve "$GITHUB_WORKSPACE/$TFPLAN_BIN"
-
-                if [ "$REQUEST_ACTIVITY" != "MIXED" ]; then
-                  exit 0
-                fi
-              fi
-            else
-              terraform -chdir="$TF_WORKDIR" plan \
-                -lock-timeout=10m \
-                -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
-                -out="$GITHUB_WORKSPACE/$TFPLAN_BIN"
-              terraform -chdir="$TF_WORKDIR" apply -lock-timeout=10m -auto-approve "$GITHUB_WORKSPACE/$TFPLAN_BIN"
-              exit 0
-            fi
-          fi
-
-          if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
-            echo "Starting ADD phase for MIXED activity template..."
-            terraform -chdir="$TF_WORKDIR" plan \
-              -lock-timeout=10m \
-              -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
-              -out="$GITHUB_WORKSPACE/$TFPLAN_MIXED_ADD_BIN"
-            terraform -chdir="$TF_WORKDIR" show -json "$GITHUB_WORKSPACE/$TFPLAN_MIXED_ADD_BIN" > "$OUTPUT_DIR/terraform-mixed-add-plan.json"
-            python "$GITHUB_WORKSPACE/uda/scripts/object-access/guard_exact_match_destroy.py" \
-              --tfvars-json "$GITHUB_WORKSPACE/$TFVARS_JSON" \
-              --plan-json "$OUTPUT_DIR/terraform-mixed-add-plan.json"
-            terraform -chdir="$TF_WORKDIR" apply -lock-timeout=10m -auto-approve "$GITHUB_WORKSPACE/$TFPLAN_MIXED_ADD_BIN"
-          fi
-
-      - name: Persist active-grants manifest
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
-        shell: bash
-        run: |
-          az storage blob upload \
-            --account-name "$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
-            --container-name "$TF_BACKEND_CONTAINER_NAME" \
-            --name "$ACTIVE_GRANTS_BLOB" \
-            --file "$TFVARS_JSON" \
-            --account-key "$TF_BACKEND_ACCESS_KEY" \
-            --overwrite true \
-            --only-show-errors
-          echo "Persistent active-grants manifest updated: $ACTIVE_GRANTS_BLOB"
+          terraform -chdir="$TF_WORKDIR" apply \
+            -lock-timeout=10m \
+            -auto-approve \
+            "$GITHUB_WORKSPACE/$TFPLAN_BIN"
 
       - name: Publish plan outputs
         if: ${{ always() && steps.prep_paths.outcome == 'success' }}
@@ -552,9 +416,6 @@ jobs:
             echo "- Output dir: $OUTPUT_DIR"
             echo "- Request activity: $REQUEST_ACTIVITY"
             echo "- Plan text: $TFPLAN_TXT"
-            if [ "$REQUEST_ACTIVITY" = "MIXED" ]; then
-              echo "- Add plan text: $TFPLAN_MIXED_ADD_TXT"
-            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   post-validate-object-access:
@@ -603,15 +464,38 @@ jobs:
             printf -v "$out_var" '%s' "$value"
           }
 
+          get_kv_secret_fallback() {
+            local out_var="$1"
+            shift
+            local names=("$@")
+            local value=""
+            for secret_name in "${names[@]}"; do
+              value="$(az keyvault secret show --vault-name "$KV" --name "$secret_name" --query value -o tsv 2>/dev/null | tr -d '\r' || true)"
+              if [ -n "$value" ]; then
+                printf -v "$out_var" '%s' "$value"
+                return 0
+              fi
+            done
+            echo "Missing Key Vault secret. Tried names: ${names[*]}" >&2
+            exit 1
+          }
+
           get_kv_secret DATABRICKS_HOST_RAW DATABRICKS-HOST
           DATABRICKS_HOST_VALUE="$(echo "$DATABRICKS_HOST_RAW" | sed -E 's#^(https://[^/]+).*$#\1#' | sed 's#/$##')"
           get_kv_secret DATABRICKS_CLIENT_ID_VALUE DB-CLIENT-ID
           get_kv_secret DATABRICKS_OAUTH_SECRET_VALUE DB-OAUTH-SECRET
+          get_kv_secret TFSTATE_STORAGE_ACCOUNT_VALUE TFSTATE-STORAGE-ACCOUNT
+          get_kv_secret TFSTATE_CONTAINER_VALUE TFSTATE-CONTAINER-DBX-UDA
+          get_kv_secret_fallback TFSTATE_ACCESS_KEY_VALUE TFSTATE-STORAGE-ACCESS-KEY TFSTATE-ACCESS-KEY TFSTATE-STORAGE-KEY STORAGE-ACCOUNT-KEY
 
           echo "::add-mask::$DATABRICKS_OAUTH_SECRET_VALUE"
+          echo "::add-mask::$TFSTATE_ACCESS_KEY_VALUE"
           echo "DB_OAUTH_CLIENT_ID=$DATABRICKS_CLIENT_ID_VALUE" >> "$GITHUB_ENV"
           echo "DB_OAUTH_CLIENT_SECRET=$DATABRICKS_OAUTH_SECRET_VALUE" >> "$GITHUB_ENV"
           echo "DATABRICKS_HOST=$DATABRICKS_HOST_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_STORAGE_ACCOUNT_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER_VALUE" >> "$GITHUB_ENV"
+          echo "TF_BACKEND_ACCESS_KEY=$TFSTATE_ACCESS_KEY_VALUE" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -625,6 +509,7 @@ jobs:
           pip install --only-binary=:all: requests==2.32.3
 
       - name: Prepare post-validation path
+        id: post_paths
         shell: bash
         run: |
           template_name="$(basename "$TEMPLATE_FILE")"
@@ -633,12 +518,15 @@ jobs:
           echo "REQUEST_ID=$request_id" >> "$GITHUB_ENV"
           echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
           echo "REQUEST_TFVARS_JSON=$output_dir/object-access-request.tfvars.json" >> "$GITHUB_ENV"
+          echo "TFVARS_JSON=$output_dir/object-access.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
 
       - name: Download plan artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          name: uda-dbx-object-access-plan-output-${{ env.REQUEST_ID }}
-          path: ${{ env.OUTPUT_DIR }}
+          name: uda-dbx-object-access-plan-output-${{ steps.post_paths.outputs.request_id }}
+          path: ${{ steps.post_paths.outputs.output_dir }}
 
       - name: Determine request activity from downloaded artifact
         shell: bash
@@ -649,18 +537,26 @@ jobs:
       - name: Validate live Databricks access vs request
         shell: bash
         run: |
-          if [ "${REQUEST_ACTIVITY:-}" = "REMOVE" ]; then
-            python "$GITHUB_WORKSPACE/uda/scripts/object-access/validate_live_access.py" \
-              --manifest-json "$REQUEST_TFVARS_JSON" \
-              --databricks-host "$DATABRICKS_HOST" \
-              --expect-absent
-            exit $?
-          fi
-
           python "$GITHUB_WORKSPACE/uda/scripts/object-access/validate_live_access.py" \
             --manifest-json "$REQUEST_TFVARS_JSON" \
             --databricks-host "$DATABRICKS_HOST" \
-            --fail-on-missing
+            --respect-activity
+
+      - name: Persist active-grants manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          environment_name="$(jq -r '.environment | ascii_downcase' "$REQUEST_TFVARS_JSON")"
+          manifest_blob="object-access/manifests/${environment_name}.json"
+          az storage blob upload \
+            --account-name "$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
+            --container-name "$TF_BACKEND_CONTAINER_NAME" \
+            --name "$manifest_blob" \
+            --file "$TFVARS_JSON" \
+            --account-key "$TF_BACKEND_ACCESS_KEY" \
+            --overwrite true \
+            --only-show-errors
+          echo "Persistent active-grants manifest updated: $manifest_blob"
 
       - name: Write validation summary
         if: always()
