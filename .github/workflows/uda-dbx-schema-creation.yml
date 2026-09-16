@@ -323,6 +323,9 @@ jobs:
       - plan-schema-creation
     if: always()
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Publish workflow summary
         run: |
           {

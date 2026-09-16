@@ -247,6 +247,9 @@ jobs:
       - post_validate_cluster_access
     if: always()
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download generated artifacts
         uses: actions/download-artifact@v4
         with:
