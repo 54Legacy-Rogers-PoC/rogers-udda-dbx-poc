@@ -23,6 +23,7 @@ DDD-specific documentation is now maintained in each request folder:
     uda-dbx-service-account.yml
     uda-dbx-cluster-adgroup-add.yml
     uda-dbx-cluster-adgroup-remove.yml
+    uda-dbx-schema-creation.yml
 terraform/
   environments/
     dev/
@@ -35,12 +36,10 @@ terraform/
     cluster-adgroup-add/
     cluster-adgroup-remove/
     service_account/
+    schema_creation/
 uda/
-  attachments/
   config/
-  docs/
   scripts/
-  templates/
   tests/
 requests/
   object-access/

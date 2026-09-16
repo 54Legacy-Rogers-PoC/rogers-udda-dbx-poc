@@ -71,7 +71,7 @@ runs:
 
     - name: Send completion email to distribution list
       if: ${{ steps.resolve_notify.outputs.enabled == 'true' }}
-      uses: dawidd6/action-send-mail@v3
+      uses: dawidd6/action-send-mail@v22
       with:
         server_address: ${{ steps.resolve_notify.outputs.smtp_server }}
         server_port: ${{ steps.resolve_notify.outputs.smtp_port }}
