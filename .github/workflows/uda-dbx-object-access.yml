@@ -631,7 +631,7 @@ jobs:
           echo "REQUEST_TFVARS_JSON=$output_dir/object-access-request.tfvars.json" >> "$GITHUB_ENV"
 
       - name: Download plan artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b9157f96f9f5f0f2d7b9d7d8 # v4.6.0
+        uses: actions/download-artifact@v4
         with:
           name: uda-dbx-object-access-plan-output-${{ env.REQUEST_ID }}
           path: ${{ env.OUTPUT_DIR }}
