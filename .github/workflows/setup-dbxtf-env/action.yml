@@ -166,29 +166,23 @@ runs:
         echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_SA" >> "$GITHUB_ENV"
         echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
         echo "TF_BACKEND_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
-        echo "TF_BACKEND_ACCESS_KEY=${TFSTATE_ACCESS_KEY:-}" >> "$GITHUB_ENV"
-        echo "TF_BACKEND_USE_AZUREAD_AUTH=${TFSTATE_ACCESS_KEY:+false}" >> "$GITHUB_ENV"
+        echo "TF_BACKEND_ACCESS_KEY=" >> "$GITHUB_ENV"
+        echo "TF_BACKEND_USE_AZUREAD_AUTH=true" >> "$GITHUB_ENV"
 
     - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
+      uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+      with:
+        terraform_version: 1.9.8
+        terraform_wrapper: false
 
     - name: Terraform init
       shell: bash
       working-directory: ${{ inputs.terraform_working_directory }}
       run: |
         set -euo pipefail
-        if [ -n "${TFSTATE_ACCESS_KEY:-}" ]; then
-          terraform init \
-            -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
-            -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
-            -backend-config="container_name=$TFSTATE_CONTAINER" \
-            -backend-config="key=$TFSTATE_KEY" \
-            -backend-config="access_key=$TFSTATE_ACCESS_KEY"
-        else
-          terraform init \
-            -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
-            -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
-            -backend-config="container_name=$TFSTATE_CONTAINER" \
-            -backend-config="key=$TFSTATE_KEY" \
-            -backend-config="use_azuread_auth=true"
-        fi
+        terraform init \
+          -backend-config="resource_group_name=$TFSTATE_RESOURCE_GROUP" \
+          -backend-config="storage_account_name=$TFSTATE_STORAGE_ACCOUNT" \
+          -backend-config="container_name=$TFSTATE_CONTAINER" \
+          -backend-config="key=$TFSTATE_KEY" \
+          -backend-config="use_azuread_auth=true"
