@@ -9,6 +9,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
@@ -64,7 +65,16 @@ def _access_control_entries(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _normalize_host(host: str) -> str:
+    value = _normalize(host).rstrip("/")
+    parsed = urlsplit(value)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return value
+
+
 def _get_databricks_token(host: str) -> str:
+    host = _normalize_host(host)
     client_id = _normalize(
         os.getenv("DB_OAUTH_CLIENT_ID")
         or os.getenv("TF_VAR_databricks_client_id")
