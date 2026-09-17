@@ -69,6 +69,7 @@ runs:
         KEYVAULT_NAME: ${{ inputs.keyvault_name }}
         AZURE_CLIENT_ID: ${{ inputs.azure_client_id }}
         AZURE_CLIENT_SECRET: ${{ inputs.azure_client_secret }}
+        AZURE_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
         AZURE_TENANT_ID: ${{ inputs.azure_tenant_id }}
       run: |
         set -euo pipefail
