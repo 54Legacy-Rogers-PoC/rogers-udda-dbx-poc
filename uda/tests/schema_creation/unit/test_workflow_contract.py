@@ -47,3 +47,14 @@ def test_schema_workflow_uses_repo_root_paths_for_plan_files() -> None:
     assert '-out="$GITHUB_WORKSPACE/$TFPLAN_BIN"' in run_text
     assert "../../$TFVARS_JSON" not in run_text
     assert "../../$TFPLAN_BIN" not in run_text
+
+
+def test_schema_workflow_uses_repo_root_path_for_apply_file() -> None:
+    workflow = _workflow()
+    apply_step = next(
+        step for job in workflow["jobs"].values() for step in job["steps"] if step.get("name") == "Terraform apply"
+    )
+    run_text = apply_step["run"]
+
+    assert 'apply -lock-timeout=10m -auto-approve "$GITHUB_WORKSPACE/$TFPLAN_BIN"' in run_text
+    assert '"../../$TFPLAN_BIN"' not in run_text

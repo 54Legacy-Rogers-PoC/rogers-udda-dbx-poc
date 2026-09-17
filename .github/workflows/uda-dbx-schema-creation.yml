@@ -305,7 +305,7 @@ jobs:
       - name: Terraform apply
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         run: |
-          terraform -chdir=terraform/modules/schema_creation apply -lock-timeout=10m -auto-approve "../../$TFPLAN_BIN"
+          terraform -chdir=terraform/modules/schema_creation apply -lock-timeout=10m -auto-approve "$GITHUB_WORKSPACE/$TFPLAN_BIN"
 
       - name: Publish plan outputs
         if: ${{ always() && steps.prep_paths.outcome == 'success' }}
