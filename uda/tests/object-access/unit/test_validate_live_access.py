@@ -84,6 +84,34 @@ def test_get_databricks_token_uses_workspace_oauth(monkeypatch: pytest.MonkeyPat
     }
 
 
+def test_get_databricks_token_accepts_tf_var_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DB_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DB_OAUTH_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("TF_VAR_databricks_client_id", "tf-client-id")
+    monkeypatch.setenv("TF_VAR_databricks_client_secret", "tf-secret")
+    captured: dict[str, object] = {}
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json() -> dict[str, str]:
+            return {"access_token": "tf-workspace-token"}
+
+    def fake_post(url: str, **kwargs: object) -> Response:
+        captured["url"] = url
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(validator.requests, "post", fake_post)
+
+    token = validator.get_databricks_token("https://adb-example.azuredatabricks.net/")
+
+    assert token == "tf-workspace-token"
+    assert captured["auth"] == ("tf-client-id", "tf-secret")
+
+
 def test_fetch_databricks_grants_uses_singular_securable_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     requested_urls: list[str] = []
 

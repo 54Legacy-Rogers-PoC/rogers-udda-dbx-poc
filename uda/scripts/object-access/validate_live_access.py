@@ -105,11 +105,22 @@ def _extract_live_keys(
 
 
 def get_databricks_token(host: str) -> str:
-    client_id = _normalize(os.getenv("DB_OAUTH_CLIENT_ID"))
-    client_secret = _normalize(os.getenv("DB_OAUTH_CLIENT_SECRET"))
+    client_id = _normalize(
+        os.getenv("DB_OAUTH_CLIENT_ID")
+        or os.getenv("TF_VAR_databricks_client_id")
+        or os.getenv("DATABRICKS_CLIENT_ID")
+    )
+    client_secret = _normalize(
+        os.getenv("DB_OAUTH_CLIENT_SECRET")
+        or os.getenv("TF_VAR_databricks_client_secret")
+        or os.getenv("DATABRICKS_CLIENT_SECRET")
+    )
 
     if not client_id or not client_secret:
-        raise RuntimeError("Missing Databricks OAuth settings: DB_OAUTH_CLIENT_ID / DB_OAUTH_CLIENT_SECRET")
+        raise RuntimeError(
+            "Missing Databricks OAuth settings. Expected DB_OAUTH_CLIENT_ID / DB_OAUTH_CLIENT_SECRET "
+            "or TF_VAR_databricks_client_id / TF_VAR_databricks_client_secret."
+        )
 
     token_url = f"{host.rstrip('/')}/oidc/v1/token"
     payload = {

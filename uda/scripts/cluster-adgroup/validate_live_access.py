@@ -77,7 +77,10 @@ def _get_databricks_token(host: str) -> str:
     )
 
     if not client_id or not client_secret:
-        raise RuntimeError("Missing Databricks OAuth settings: DB_OAUTH_CLIENT_ID / DB_OAUTH_CLIENT_SECRET")
+        raise RuntimeError(
+            "Missing Databricks OAuth settings. Expected DB_OAUTH_CLIENT_ID / DB_OAUTH_CLIENT_SECRET "
+            "or TF_VAR_databricks_client_id / TF_VAR_databricks_client_secret."
+        )
 
     token_url = f"{host.rstrip('/')}/oidc/v1/token"
     response = requests.post(

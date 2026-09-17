@@ -121,10 +121,17 @@ runs:
         [ -n "$DBX_TENANT_ID" ] || { echo "ERROR: Databricks tenant id not found in KV and AZURE_TENANT_ID is empty."; exit 1; }
         [ -n "$DBX_WORKSPACE_RESOURCE_ID" ] || { echo "ERROR: DATABRICKS-WORKSPACE-RESOURCE-ID is required for Azure SP auth."; exit 1; }
 
+        echo "DATABRICKS_HOST=$DBX_HOST" >> "$GITHUB_ENV"
         echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
+        echo "DATABRICKS_CLIENT_ID=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
         echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
+        echo "DB_OAUTH_CLIENT_ID=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
+        echo "DATABRICKS_CLIENT_SECRET=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
         echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
+        echo "DB_OAUTH_CLIENT_SECRET=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
+        echo "DATABRICKS_TENANT_ID=$DBX_TENANT_ID" >> "$GITHUB_ENV"
         echo "TF_VAR_databricks_tenant_id=$DBX_TENANT_ID" >> "$GITHUB_ENV"
+        echo "DATABRICKS_WORKSPACE_RESOURCE_ID=$DBX_WORKSPACE_RESOURCE_ID" >> "$GITHUB_ENV"
         echo "TF_VAR_databricks_workspace_resource_id=$DBX_WORKSPACE_RESOURCE_ID" >> "$GITHUB_ENV"
 
         TFSTATE_RG=$(get_kv_secret "TF state resource group" TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)
