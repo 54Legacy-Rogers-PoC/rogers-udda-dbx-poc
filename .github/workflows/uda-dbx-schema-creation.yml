@@ -5,12 +5,12 @@ on:
     branches:
       - feature/furqan-udda
     paths:
-      - "uda/templates/schema-creation/**"
+      - "requests/schema-creation/dev/**"
   pull_request:
     branches:
       - feature/furqan-udda
     paths:
-      - "uda/templates/schema-creation/**"
+      - "requests/schema-creation/dev/**"
   workflow_dispatch:
     inputs:
       request_file:
