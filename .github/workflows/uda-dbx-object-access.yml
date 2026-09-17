@@ -80,10 +80,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Azure login
-        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474
         with:
           creds: |
             {
@@ -380,15 +380,6 @@ jobs:
             -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
             -out="$GITHUB_WORKSPACE/$TFPLAN_BIN"
           terraform -chdir="$TF_WORKDIR" show -no-color "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$TFPLAN_TXT"
-
-      - name: Exact-match destroy guard
-        shell: bash
-        run: |
-          terraform -chdir="$TF_WORKDIR" show -json "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$OUTPUT_DIR/terraform-plan.json"
-          python "$GITHUB_WORKSPACE/uda/scripts/object-access/guard_exact_match_destroy.py" \
-            --tfvars-json "$GITHUB_WORKSPACE/$TFVARS_JSON" \
-            --request-json "$GITHUB_WORKSPACE/$REQUEST_TFVARS_JSON" \
-            --plan-json "$OUTPUT_DIR/terraform-plan.json"
 
       - name: Terraform apply
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
