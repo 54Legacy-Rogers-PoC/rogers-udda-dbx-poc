@@ -34,3 +34,16 @@ def test_schema_workflow_uses_real_terraform_module_path() -> None:
     assert "terraform/schema_creation" not in step_text
     assert "terraform/modules/schema_creation" in step_text
     assert "--terraform-variables-file terraform/modules/schema_creation/variables.tf" in step_text
+
+
+def test_schema_workflow_uses_repo_root_paths_for_plan_files() -> None:
+    workflow = _workflow()
+    plan_step = next(
+        step for job in workflow["jobs"].values() for step in job["steps"] if step.get("name") == "Terraform plan"
+    )
+    run_text = plan_step["run"]
+
+    assert '-var-file="$GITHUB_WORKSPACE/$TFVARS_JSON"' in run_text
+    assert '-out="$GITHUB_WORKSPACE/$TFPLAN_BIN"' in run_text
+    assert "../../$TFVARS_JSON" not in run_text
+    assert "../../$TFPLAN_BIN" not in run_text

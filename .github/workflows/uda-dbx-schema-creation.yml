@@ -280,10 +280,10 @@ jobs:
         run: |
           terraform -chdir=terraform/modules/schema_creation plan \
             -lock-timeout=10m \
-            -var-file="../../$TFVARS_JSON" \
-            -out="../../$TFPLAN_BIN"
+            -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
+            -out="$GITHUB_WORKSPACE/$TFPLAN_BIN"
 
-          terraform -chdir=terraform/modules/schema_creation show -no-color "../../$TFPLAN_BIN" > "$TFPLAN_TXT"
+          terraform -chdir=terraform/modules/schema_creation show -no-color "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$TFPLAN_TXT"
 
       - name: Block destructive plan unless explicitly allowed
         shell: bash
@@ -291,7 +291,7 @@ jobs:
           ALLOW_DESTROY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_destroy || 'false' }}
         run: |
           PLAN_JSON="$OUTPUT_DIR/schema-creation-plan.json"
-          terraform -chdir=terraform/modules/schema_creation show -json "../../$TFPLAN_BIN" > "$PLAN_JSON"
+          terraform -chdir=terraform/modules/schema_creation show -json "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$PLAN_JSON"
 
           destroy_count="$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' "$PLAN_JSON")"
           echo "Plan delete/replace action count: $destroy_count"
