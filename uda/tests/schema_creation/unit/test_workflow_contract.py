@@ -22,3 +22,15 @@ def test_post_validation_job_exists_and_runs_after_apply() -> None:
     assert "Validate live Databricks schema state" in names
     assert "Persist schema creation status" in names
     assert names.index("Validate live Databricks schema state") < names.index("Persist schema creation status")
+
+
+def test_schema_workflow_uses_real_terraform_module_path() -> None:
+    workflow = _workflow()
+    step_text = "\n".join(
+        "\n".join(f"{step.get('name', '')}: {step.get('run', '')}" for step in job["steps"])
+        for job in workflow["jobs"].values()
+    )
+
+    assert "terraform/schema_creation" not in step_text
+    assert "terraform/modules/schema_creation" in step_text
+    assert "--terraform-variables-file terraform/modules/schema_creation/variables.tf" in step_text

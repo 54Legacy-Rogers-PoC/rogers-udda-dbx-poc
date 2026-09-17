@@ -238,7 +238,7 @@ jobs:
           python uda/scripts/schema-creation/generate_tfvars.py \
             --input-json "$NORMALIZED_JSON" \
             --output-json "$TFVARS_JSON" \
-            --terraform-variables-file terraform/schema_creation/variables.tf
+            --terraform-variables-file terraform/modules/schema_creation/variables.tf
 
       - name: Terraform init (with retry)
         shell: bash
@@ -246,7 +246,7 @@ jobs:
           for attempt in 1 2 3; do
             echo "Terraform init attempt $attempt/3"
             if [ "${TF_BACKEND_USE_AZUREAD_AUTH:-true}" = "true" ]; then
-              if terraform -chdir=terraform/schema_creation init \
+              if terraform -chdir=terraform/modules/schema_creation init \
                 -backend-config="resource_group_name=$TF_BACKEND_RESOURCE_GROUP_NAME" \
                 -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
                 -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
@@ -259,7 +259,7 @@ jobs:
                 echo "TF_BACKEND_ACCESS_KEY is empty; cannot initialize Terraform backend with storage-key auth." >&2
                 exit 1
               fi
-              if terraform -chdir=terraform/schema_creation init \
+              if terraform -chdir=terraform/modules/schema_creation init \
                 -backend-config="resource_group_name=$TF_BACKEND_RESOURCE_GROUP_NAME" \
                 -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
                 -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
@@ -278,12 +278,12 @@ jobs:
 
       - name: Terraform plan
         run: |
-          terraform -chdir=terraform/schema_creation plan \
+          terraform -chdir=terraform/modules/schema_creation plan \
             -lock-timeout=10m \
             -var-file="../../$TFVARS_JSON" \
             -out="../../$TFPLAN_BIN"
 
-          terraform -chdir=terraform/schema_creation show -no-color "../../$TFPLAN_BIN" > "$TFPLAN_TXT"
+          terraform -chdir=terraform/modules/schema_creation show -no-color "../../$TFPLAN_BIN" > "$TFPLAN_TXT"
 
       - name: Block destructive plan unless explicitly allowed
         shell: bash
@@ -291,7 +291,7 @@ jobs:
           ALLOW_DESTROY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_destroy || 'false' }}
         run: |
           PLAN_JSON="$OUTPUT_DIR/schema-creation-plan.json"
-          terraform -chdir=terraform/schema_creation show -json "../../$TFPLAN_BIN" > "$PLAN_JSON"
+          terraform -chdir=terraform/modules/schema_creation show -json "../../$TFPLAN_BIN" > "$PLAN_JSON"
 
           destroy_count="$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' "$PLAN_JSON")"
           echo "Plan delete/replace action count: $destroy_count"
@@ -305,7 +305,7 @@ jobs:
       - name: Terraform apply
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         run: |
-          terraform -chdir=terraform/schema_creation apply -lock-timeout=10m -auto-approve "../../$TFPLAN_BIN"
+          terraform -chdir=terraform/modules/schema_creation apply -lock-timeout=10m -auto-approve "../../$TFPLAN_BIN"
 
       - name: Publish plan outputs
         if: ${{ always() && steps.prep_paths.outcome == 'success' }}
