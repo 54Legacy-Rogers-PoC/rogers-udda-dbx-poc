@@ -33,3 +33,17 @@ def test_artifact_download_uses_step_outputs() -> None:
 
     assert "steps.post_paths.outputs.request_id" in download["with"]["name"]
     assert download["with"]["path"] == "${{ steps.post_paths.outputs.output_dir }}"
+
+
+def test_plan_and_validation_jobs_use_shared_databricks_setup_action() -> None:
+    workflow = _workflow()
+    action_reference = (
+        "54Legacy-Rogers-PoC/54legacy-Resusable-Workflows/"
+        "actions/setup-databricks@feature/furqan"
+    )
+
+    for job_name in ("plan-object-access", "post-validate-object-access"):
+        steps = workflow["jobs"][job_name]["steps"]
+        setup_steps = [step for step in steps if step.get("uses") == action_reference]
+        assert len(setup_steps) == 1
+        assert not any(step.get("uses", "").startswith("azure/login@") for step in steps)
