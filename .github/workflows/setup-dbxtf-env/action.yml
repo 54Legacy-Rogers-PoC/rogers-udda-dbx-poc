@@ -109,7 +109,17 @@ runs:
 
         DBX_HOST=$(get_kv_secret "Databricks host" DATABRICKS-HOST DATABRICKS_HOST)
         DBX_HOST="${DBX_HOST%/}"
-        DBX_HOST="${DBX_HOST%%/*}"
+        if [[ "$DBX_HOST" =~ ^https?:// ]]; then
+          DBX_HOST="${DBX_HOST#http://}"
+          DBX_HOST="${DBX_HOST#https://}"
+          DBX_HOST="${DBX_HOST%%/*}"
+          DBX_HOST="https://${DBX_HOST}"
+        else
+          DBX_HOST="${DBX_HOST%%/*}"
+          if [[ "$DBX_HOST" != https://* && "$DBX_HOST" != http://* ]]; then
+            DBX_HOST="https://${DBX_HOST}"
+          fi
+        fi
         DBX_CLIENT_ID=$(try_kv_secret DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID || true)
         DBX_CLIENT_SECRET=$(try_kv_secret DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET || true)
         DBX_TENANT_ID=$(try_kv_secret DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID || true)
