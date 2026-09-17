@@ -14,6 +14,21 @@ add_request() {
   p="$(normalize_path "$1")"
   [ -z "$p" ] && return 0
   [[ "$p" == requests/schema-creation/dev/*.yml || "$p" == requests/schema-creation/dev/*.yaml || "$p" == uda/templates/schema-creation/*.yml || "$p" == uda/templates/schema-creation/*.yaml ]] || return 0
+
+  if [ -f "$p" ]; then
+    REQUESTS+=("$p")
+    return 0
+  fi
+
+  local dir="${p%/*}"
+  local stem="${p%.*}"
+  for candidate in "$stem.yml" "$stem.yaml"; do
+    if [ -f "$candidate" ]; then
+      REQUESTS+=("$candidate")
+      return 0
+    fi
+  done
+
   REQUESTS+=("$p")
 }
 
