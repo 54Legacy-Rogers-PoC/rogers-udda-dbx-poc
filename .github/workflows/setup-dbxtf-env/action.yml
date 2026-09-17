@@ -123,10 +123,8 @@ runs:
 
         echo "DATABRICKS_HOST=$DBX_HOST" >> "$GITHUB_ENV"
         echo "TF_VAR_databricks_host=$DBX_HOST" >> "$GITHUB_ENV"
-        echo "DATABRICKS_CLIENT_ID=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
         echo "TF_VAR_databricks_client_id=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
         echo "DB_OAUTH_CLIENT_ID=$DBX_CLIENT_ID" >> "$GITHUB_ENV"
-        echo "DATABRICKS_CLIENT_SECRET=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
         echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
         echo "DB_OAUTH_CLIENT_SECRET=$DBX_CLIENT_SECRET" >> "$GITHUB_ENV"
         echo "DATABRICKS_TENANT_ID=$DBX_TENANT_ID" >> "$GITHUB_ENV"
