@@ -1,7 +1,20 @@
 environment_mapping:
   Production: PRD
+  production: PRD
+  Prod: PRD
+  prod: PRD
+  PRD: PRD
+  prd: PRD
   QA/Test: QA
+  QA: QA
+  qa/test: QA
+  qa: QA
+  Test: QA
+  test: QA
   Development: DEV
+  Dev: DEV
+  development: DEV
+  dev: DEV
 
 template:
   worksheet_name: ObjectAccess

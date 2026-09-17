@@ -2,13 +2,21 @@ version: 1
 
 # Human-entered values -> normalized environment codes used by scripts and Terraform.
 aliases:
+  Production: PRD
   production: PRD
+  Prod: PRD
   prod: PRD
+  PRD: PRD
   prd: PRD
+  Development: DEV
   development: DEV
+  Dev: DEV
   dev: DEV
+  QA/Test: QA
+  QA: QA
   qa/test: QA
   qa: QA
+  Test: QA
   test: QA
 
 # Optional references for environment-specific config files.
