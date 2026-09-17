@@ -174,21 +174,31 @@ jobs:
       - name: Terraform init (with retry)
         shell: bash
         run: |
-          if [ -z "${TF_BACKEND_ACCESS_KEY:-}" ]; then
-            echo "TF_BACKEND_ACCESS_KEY is empty; cannot initialize Terraform backend." >&2
-            exit 1
-          fi
-
           for attempt in 1 2 3; do
             echo "Terraform init attempt $attempt/3"
-            if terraform -chdir="$TF_WORKDIR" init \
-              -backend-config="resource_group_name=$TF_BACKEND_RESOURCE_GROUP_NAME" \
-              -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
-              -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
-              -backend-config="key=$TF_BACKEND_KEY" \
-              -backend-config="use_azuread_auth=false" \
-              -backend-config="access_key=$TF_BACKEND_ACCESS_KEY"; then
-              exit 0
+            if [ "${TF_BACKEND_USE_AZUREAD_AUTH:-true}" = "true" ]; then
+              if terraform -chdir="$TF_WORKDIR" init \
+                -backend-config="resource_group_name=$TF_BACKEND_RESOURCE_GROUP_NAME" \
+                -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
+                -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
+                -backend-config="key=$TF_BACKEND_KEY" \
+                -backend-config="use_azuread_auth=true"; then
+                exit 0
+              fi
+            else
+              if [ -z "${TF_BACKEND_ACCESS_KEY:-}" ]; then
+                echo "TF_BACKEND_ACCESS_KEY is empty; cannot initialize Terraform backend with storage-key auth." >&2
+                exit 1
+              fi
+              if terraform -chdir="$TF_WORKDIR" init \
+                -backend-config="resource_group_name=$TF_BACKEND_RESOURCE_GROUP_NAME" \
+                -backend-config="storage_account_name=$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
+                -backend-config="container_name=$TF_BACKEND_CONTAINER_NAME" \
+                -backend-config="key=$TF_BACKEND_KEY" \
+                -backend-config="use_azuread_auth=false" \
+                -backend-config="access_key=$TF_BACKEND_ACCESS_KEY"; then
+                exit 0
+              fi
             fi
             if [ "$attempt" -lt 3 ]; then
               sleep 15
@@ -209,7 +219,7 @@ jobs:
             --account-name "$TF_BACKEND_STORAGE_ACCOUNT_NAME" \
             --container-name "$TF_BACKEND_CONTAINER_NAME" \
             --name "$manifest_blob" \
-            --account-key "$TF_BACKEND_ACCESS_KEY" \
+            --auth-mode login \
             --query exists \
             --output tsv \
             --only-show-errors)"
@@ -220,7 +230,7 @@ jobs:
               --container-name "$TF_BACKEND_CONTAINER_NAME" \
               --name "$manifest_blob" \
               --file "$ACTIVE_GRANTS_MANIFEST" \
-              --account-key "$TF_BACKEND_ACCESS_KEY" \
+              --auth-mode login \
               --overwrite true \
               --only-show-errors
           else
@@ -417,7 +427,7 @@ jobs:
             --container-name "$TF_BACKEND_CONTAINER_NAME" \
             --name "$manifest_blob" \
             --file "$TFVARS_JSON" \
-            --account-key "$TF_BACKEND_ACCESS_KEY" \
+            --auth-mode login \
             --overwrite true \
             --only-show-errors
           echo "Persistent active-grants manifest updated: $manifest_blob"
