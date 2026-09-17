@@ -169,6 +169,12 @@ runs:
         echo "TF_BACKEND_ACCESS_KEY=" >> "$GITHUB_ENV"
         echo "TF_BACKEND_USE_AZUREAD_AUTH=true" >> "$GITHUB_ENV"
 
+        echo "ARM_CLIENT_ID=${AZURE_CLIENT_ID}" >> "$GITHUB_ENV"
+        echo "ARM_CLIENT_SECRET=${AZURE_CLIENT_SECRET}" >> "$GITHUB_ENV"
+        echo "ARM_TENANT_ID=${AZURE_TENANT_ID}" >> "$GITHUB_ENV"
+        echo "ARM_SUBSCRIPTION_ID=${AZURE_SUBSCRIPTION_ID}" >> "$GITHUB_ENV"
+        echo "ARM_USE_OIDC=false" >> "$GITHUB_ENV"
+
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
       with:
