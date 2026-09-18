@@ -28,6 +28,7 @@ def test_build_targets_uses_environment_catalogs() -> None:
         "sandbox_mode": "new",
         "sandbox_schema_name": "slfsrv_manoj_basemarketing",
         "sandbox_owner_name": "furqan@54legacy.com",
+        "ad_group_name": "analytics@example.com",
         "create_communitymart_schema": True,
         "communitymart_schema_name": "finance",
         "communitymart_owner_name": "owner@54legacy.com",
@@ -48,10 +49,12 @@ def test_build_targets_uses_environment_catalogs() -> None:
         ("sandbox", "edlbi_ss", "slfsrv_manoj_basemarketing"),
         ("communitymart", "edl_communitymart", "finance"),
     ]
-    assert targets[0].storage_root == "abfss://sandbox-manoj@stadbdev.dfs.core.windows.net/slfsrv_manoj_basemarketing"
-    assert targets[0].external_location_name == "el_prd__sandbox-manoj__at__stadbdev__rw"
-    assert targets[0].external_location_url == "abfss://sandbox-manoj@stadbdev.dfs.core.windows.net/"
-    assert targets[1].storage_root == "abfss://edl-community-mart@stadbdev.dfs.core.windows.net/edl_community_mart/finance"
+    assert targets[0].principal == "analytics@example.com"
+    assert targets[0].schema_privileges == frozenset({"ALL_PRIVILEGES"})
+    assert targets[0].catalog_privileges == frozenset()
+    assert targets[1].principal == "analytics@example.com"
+    assert targets[1].schema_privileges == frozenset({"USE_SCHEMA"})
+    assert targets[1].catalog_privileges == frozenset({"USE_CATALOG"})
 
 
 def test_has_privileges_requires_all_expected_values() -> None:
@@ -69,12 +72,23 @@ def test_has_privileges_requires_all_expected_values() -> None:
     )
 
 
+def test_all_privileges_satisfies_narrower_schema_permission() -> None:
+    assignments = {
+        "privilege_assignments": [
+            {"principal": "owner@54legacy.com", "privileges": ["ALL_PRIVILEGES"]}
+        ]
+    }
+
+    assert validator._has_privileges(assignments, "owner@54legacy.com", {"USE_SCHEMA"})
+
+
 def test_validate_checks_both_schema_targets(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = {
         "environment": "PRD",
         "sandbox_mode": "new",
         "sandbox_schema_name": "sandbox_schema",
         "sandbox_owner_name": "sandbox-owner@example.com",
+        "ad_group_name": "analytics@example.com",
         "create_communitymart_schema": True,
         "communitymart_schema_name": "mart_schema",
         "communitymart_owner_name": "mart-owner@example.com",
@@ -96,7 +110,7 @@ def test_validate_checks_both_schema_targets(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(
         validator,
         "_validate_target",
-        lambda _host, _token, target, _default_principals: checked.append(target.kind) or [],
+        lambda _host, _token, target: checked.append(target.kind) or [],
     )
 
     assert validator.validate_request("request.json", "https://adb.example.net") == 0
@@ -109,6 +123,7 @@ def test_validate_writes_failed_report(monkeypatch: pytest.MonkeyPatch, tmp_path
         "sandbox_mode": "new",
         "sandbox_schema_name": "sandbox_schema",
         "sandbox_owner_name": "owner@example.com",
+        "ad_group_name": "analytics@example.com",
         "create_communitymart_schema": False,
     }
     config = {
@@ -135,40 +150,20 @@ def test_validate_writes_failed_report(monkeypatch: pytest.MonkeyPatch, tmp_path
     }
 
 
-def test_validate_sandbox_target_checks_live_resources(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_validate_sandbox_target_checks_schema_and_ad_group_grant(monkeypatch: pytest.MonkeyPatch) -> None:
     target = validator.SchemaTarget(
         kind="sandbox",
         catalog="edlbi_ss",
         schema="slfsrv_manoj_basemarketing",
-        owner="owner@example.com",
-        storage_root="abfss://sandbox-manoj@storage.dfs.core.windows.net/slfsrv_manoj_basemarketing",
-        external_location_name="el_prd__sandbox-manoj__at__storage__rw",
-        external_location_url="abfss://sandbox-manoj@storage.dfs.core.windows.net/",
-        storage_credential_name="credential",
+        principal="analytics@example.com",
+        schema_privileges=frozenset({"ALL_PRIVILEGES"}),
+        catalog_privileges=frozenset(),
     )
     responses = {
-        "/api/2.1/unity-catalog/schemas/edlbi_ss.slfsrv_manoj_basemarketing": {
-            "storage_root": target.storage_root,
-        },
+        "/api/2.1/unity-catalog/schemas/edlbi_ss.slfsrv_manoj_basemarketing": {},
         "/api/2.1/unity-catalog/permissions/schema/edlbi_ss.slfsrv_manoj_basemarketing": {
             "privilege_assignments": [
-                {"principal": target.owner, "privileges": ["ALL_PRIVILEGES"]}
-            ]
-        },
-        "/api/2.1/unity-catalog/external-locations/el_prd__sandbox-manoj__at__storage__rw": {
-            "url": target.external_location_url,
-            "credential_name": target.storage_credential_name,
-        },
-        "/api/2.1/unity-catalog/permissions/external-location/el_prd__sandbox-manoj__at__storage__rw": {
-            "privilege_assignments": [
-                {
-                    "principal": target.owner,
-                    "privileges": ["READ FILES", "WRITE FILES", "MANAGE"],
-                },
-                {
-                    "principal": "default@example.com",
-                    "privileges": ["READ FILES", "WRITE FILES"],
-                },
+                {"principal": target.principal, "privileges": ["ALL_PRIVILEGES"]}
             ]
         },
     }
@@ -184,6 +179,37 @@ def test_validate_sandbox_target_checks_live_resources(monkeypatch: pytest.Monke
         "https://adb.example.net",
         "token",
         target,
-        {"default@example.com"},
     ) == []
     assert requested_paths == list(responses)
+
+
+def test_validate_communitymart_checks_schema_and_catalog_grants(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = validator.SchemaTarget(
+        kind="communitymart",
+        catalog="edl_communitymart",
+        schema="vw_reporting",
+        principal="analytics@example.com",
+        schema_privileges=frozenset({"USE_SCHEMA"}),
+        catalog_privileges=frozenset({"USE_CATALOG"}),
+    )
+    responses = {
+        "/api/2.1/unity-catalog/schemas/edl_communitymart.vw_reporting": {},
+        "/api/2.1/unity-catalog/permissions/schema/edl_communitymart.vw_reporting": {
+            "privilege_assignments": [
+                {"principal": target.principal, "privileges": ["USE_SCHEMA"]}
+            ]
+        },
+        "/api/2.1/unity-catalog/permissions/catalog/edl_communitymart": {
+            "privilege_assignments": [
+                {"principal": target.principal, "privileges": ["USE_CATALOG"]}
+            ]
+        },
+    }
+
+    monkeypatch.setattr(
+        validator,
+        "_get_resource",
+        lambda _host, _token, path, _description: responses[path],
+    )
+
+    assert validator._validate_target("https://adb.example.net", "token", target) == []

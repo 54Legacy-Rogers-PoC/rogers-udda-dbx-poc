@@ -148,6 +148,7 @@ module "schema_creation" {
   create_communitymart_schema             = var.create_communitymart_schema
   communitymart_schema_name               = var.communitymart_schema_name
   communitymart_owner_name                = var.communitymart_owner_name
+  ad_group_name                           = var.ad_group_name
   justification                           = var.justification
   additional_information                  = var.additional_information
   assignment_group                        = var.assignment_group

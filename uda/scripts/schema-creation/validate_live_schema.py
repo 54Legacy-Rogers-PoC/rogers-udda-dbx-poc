@@ -18,7 +18,6 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ENVIRONMENT_MAPPING_FILE = REPO_ROOT / "uda" / "config" / "environment-mapping.yaml"
-DEFAULT_EXTERNAL_LOCATION_RW_PRINCIPALS = {"furqan@54legacy.com"}
 
 
 @dataclass(frozen=True)
@@ -26,11 +25,9 @@ class SchemaTarget:
     kind: str
     catalog: str
     schema: str
-    owner: str
-    storage_root: str
-    external_location_name: str = ""
-    external_location_url: str = ""
-    storage_credential_name: str = ""
+    principal: str
+    schema_privileges: frozenset[str]
+    catalog_privileges: frozenset[str]
 
 
 def _norm(value: Any) -> str:
@@ -69,45 +66,31 @@ def _load_schema_config(environment: str) -> dict[str, Any]:
     return schema_config
 
 
-def _sandbox_container(schema_name: str) -> str:
-    parts = schema_name.split("_")
-    suffix = "-".join(parts[1:-1]) if len(parts) > 2 else schema_name.replace("_", "-")
-    return f"sandbox-{suffix}"
-
-
 def _build_targets(payload: dict[str, Any], config: dict[str, Any]) -> list[SchemaTarget]:
     targets: list[SchemaTarget] = []
-    environment = _norm(payload.get("environment")).lower()
+    principal = _norm(payload.get("ad_group_name")).lower()
 
     if _norm(payload.get("sandbox_mode")).lower() == "new":
-        schema = _norm(payload.get("sandbox_schema_name")).lower()
-        storage_account = _norm(config.get("sandbox_storage_account_name"))
-        container = _sandbox_container(schema)
         targets.append(
             SchemaTarget(
                 kind="sandbox",
                 catalog=_norm(config.get("sandbox_catalog_name")),
-                schema=schema,
-                owner=_norm(payload.get("sandbox_owner_name")).lower(),
-                storage_root=f"abfss://{container}@{storage_account}.dfs.core.windows.net/{schema}",
-                external_location_name=f"el_{environment}__{container}__at__{storage_account}__rw",
-                external_location_url=f"abfss://{container}@{storage_account}.dfs.core.windows.net/",
-                storage_credential_name=_norm(config.get("sandbox_storage_credential_name")),
+                schema=_norm(payload.get("sandbox_schema_name")).lower(),
+                principal=principal,
+                schema_privileges=frozenset({"ALL_PRIVILEGES"}),
+                catalog_privileges=frozenset(),
             )
         )
 
     if payload.get("create_communitymart_schema") is True:
-        schema = _norm(payload.get("communitymart_schema_name")).lower()
-        storage_account = _norm(config.get("communitymart_storage_account_name"))
-        container = _norm(config.get("communitymart_container_name"))
-        prefix = _norm(config.get("communitymart_storage_prefix")).strip("/")
         targets.append(
             SchemaTarget(
                 kind="communitymart",
                 catalog=_norm(config.get("communitymart_catalog_name")),
-                schema=schema,
-                owner=_norm(payload.get("communitymart_owner_name")).lower(),
-                storage_root=f"abfss://{container}@{storage_account}.dfs.core.windows.net/{prefix}/{schema}",
+                schema=_norm(payload.get("communitymart_schema_name")).lower(),
+                principal=principal,
+                schema_privileges=frozenset({"USE_SCHEMA"}),
+                catalog_privileges=frozenset({"USE_CATALOG"}),
             )
         )
 
@@ -181,20 +164,15 @@ def _has_privileges(payload: dict[str, Any], principal: str, expected: set[str])
         if isinstance(privileges, str):
             privileges = [privileges]
         actual = {_norm(privilege).upper() for privilege in privileges}
-        if actual_principal == principal.lower() and expected <= actual:
+        if actual_principal == principal.lower() and ("ALL_PRIVILEGES" in actual or expected <= actual):
             return True
     return False
-
-
-def _same_location(actual: Any, expected: str) -> bool:
-    return _norm(actual).rstrip("/").lower() == expected.rstrip("/").lower()
 
 
 def _validate_target(
     host: str,
     token: str,
     target: SchemaTarget,
-    default_principals: set[str],
 ) -> list[str]:
     errors: list[str] = []
     full_name = f"{target.catalog}.{target.schema}"
@@ -207,67 +185,33 @@ def _validate_target(
     if schema is None:
         return [f"Schema {full_name} does not exist"]
 
-    actual_storage_root = schema.get("storage_root") or schema.get("storage_location")
-    if not _same_location(actual_storage_root, target.storage_root):
-        errors.append(
-            f"Schema {full_name} storage root mismatch: expected {target.storage_root}, "
-            f"found {_norm(actual_storage_root) or '<empty>'}"
-        )
-
     permissions = _get_resource(
         host,
         token,
         f"/api/2.1/unity-catalog/permissions/schema/{quote(full_name, safe='.')}",
         f"Schema permissions lookup for {full_name}",
     )
-    if permissions is None or not _has_privileges(permissions, target.owner, {"ALL_PRIVILEGES"}):
-        errors.append(f"Owner {target.owner} does not have ALL_PRIVILEGES on schema {full_name}")
-
-    if target.kind != "sandbox":
-        return errors
-
-    location_name = quote(target.external_location_name, safe="")
-    location = _get_resource(
-        host,
-        token,
-        f"/api/2.1/unity-catalog/external-locations/{location_name}",
-        f"External location lookup for {target.external_location_name}",
-    )
-    if location is None:
-        errors.append(f"External location {target.external_location_name} does not exist")
-        return errors
-
-    if not _same_location(location.get("url"), target.external_location_url):
-        errors.append(
-            f"External location {target.external_location_name} URL mismatch: expected "
-            f"{target.external_location_url}, found {_norm(location.get('url')) or '<empty>'}"
-        )
-    if _norm(location.get("credential_name")) != target.storage_credential_name:
-        errors.append(
-            f"External location {target.external_location_name} credential mismatch: expected "
-            f"{target.storage_credential_name}, found {_norm(location.get('credential_name')) or '<empty>'}"
-        )
-
-    location_permissions = _get_resource(
-        host,
-        token,
-        f"/api/2.1/unity-catalog/permissions/external-location/{location_name}",
-        f"External location permissions lookup for {target.external_location_name}",
-    )
-    if location_permissions is None or not _has_privileges(
-        location_permissions, target.owner, {"READ FILES", "WRITE FILES", "MANAGE"}
+    if permissions is None or not _has_privileges(
+        permissions, target.principal, set(target.schema_privileges)
     ):
         errors.append(
-            f"Owner {target.owner} does not have READ FILES, WRITE FILES, and MANAGE "
-            f"on external location {target.external_location_name}"
+            f"AD group {target.principal} does not have {', '.join(sorted(target.schema_privileges))} "
+            f"on schema {full_name}"
         )
-    for principal in sorted(default_principals - {target.owner}):
-        if location_permissions is None or not _has_privileges(
-            location_permissions, principal, {"READ FILES", "WRITE FILES"}
+
+    if target.catalog_privileges:
+        catalog_permissions = _get_resource(
+            host,
+            token,
+            f"/api/2.1/unity-catalog/permissions/catalog/{quote(target.catalog, safe='')}",
+            f"Catalog permissions lookup for {target.catalog}",
+        )
+        if catalog_permissions is None or not _has_privileges(
+            catalog_permissions, target.principal, set(target.catalog_privileges)
         ):
             errors.append(
-                f"Default principal {principal} does not have READ FILES and WRITE FILES "
-                f"on external location {target.external_location_name}"
+                f"AD group {target.principal} does not have "
+                f"{', '.join(sorted(target.catalog_privileges))} on catalog {target.catalog}"
             )
     return errors
 
@@ -309,7 +253,7 @@ def validate_request(request_json: str, host: str, output_json: str | None = Non
     token = _get_token(host)
     errors: list[str] = []
     for target in targets:
-        errors.extend(_validate_target(host, token, target, DEFAULT_EXTERNAL_LOCATION_RW_PRINCIPALS))
+        errors.extend(_validate_target(host, token, target))
 
     if errors:
         _write_report(output_json, "failed", targets, errors)

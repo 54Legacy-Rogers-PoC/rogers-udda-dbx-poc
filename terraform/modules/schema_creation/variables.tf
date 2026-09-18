@@ -47,6 +47,11 @@ variable "communitymart_owner_name" {
   default     = ""
 }
 
+variable "ad_group_name" {
+  description = "AD group receiving schema and catalog permissions."
+  type        = string
+}
+
 variable "justification" {
   description = "Business justification for request."
   type        = string

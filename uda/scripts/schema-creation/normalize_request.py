@@ -47,6 +47,7 @@ def normalize_payload(payload: dict[str, Any], request_file: Path) -> dict[str, 
     governance = as_dict(payload, "governance")
     sandbox = as_dict(payload, "sandbox")
     communitymart = as_dict(payload, "communitymart")
+    ad_group = as_dict(payload, "ad_group")
     metadata = as_dict(payload, "metadata")
 
     environment_raw = normalize(payload.get("environment"))
@@ -73,6 +74,7 @@ def normalize_payload(payload: dict[str, Any], request_file: Path) -> dict[str, 
         "create_communitymart_schema": create_communitymart_schema,
         "communitymart_schema_name": normalize(communitymart.get("schema_name")).lower(),
         "communitymart_owner_name": communitymart_owner,
+        "ad_group_name": normalize_email(ad_group.get("name")),
         "justification": normalize(payload.get("justification")),
         "additional_information": normalize(payload.get("additional_information")),
         "assignment_group": normalize(payload.get("assignment_group")),

@@ -60,12 +60,12 @@ variable "access_for_types" {
 variable "service_account_cluster_access_records" {
   description = "Service-account cluster access actions parsed from the request artifact"
   type = list(object({
-    row_id                = string
-    activity              = string
-    service_account_name  = string
-    cluster_name          = string
-    cluster_id            = string
-    permission_level      = string
+    row_id               = string
+    activity             = string
+    service_account_name = string
+    cluster_name         = string
+    cluster_id           = string
+    permission_level     = string
   }))
   default = []
 }
@@ -131,6 +131,12 @@ variable "communitymart_schema_name" {
 
 variable "communitymart_owner_name" {
   description = "Community mart owner UPN/email"
+  type        = string
+  default     = ""
+}
+
+variable "ad_group_name" {
+  description = "AD group receiving access to requested schemas and catalogs"
   type        = string
   default     = ""
 }

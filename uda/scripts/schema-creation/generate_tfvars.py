@@ -28,6 +28,7 @@ DECLARED_TFVARS_KEYS = [
     "create_communitymart_schema",
     "communitymart_schema_name",
     "communitymart_owner_name",
+    "ad_group_name",
     "justification",
     "additional_information",
     "assignment_group",
