@@ -86,3 +86,30 @@ def test_build_shared_payload_rejects_mixed_environments(tmp_path: Path) -> None
             existing_request_ids={"RITM-OLD"},
             requests_directory=requests_dir,
         )
+
+
+def test_duplicate_schema_error_provides_actionable_summary(tmp_path: Path) -> None:
+    existing = _normalized("RITM78067", "slfsrv_data_reporting")
+    current = _normalized("RITM7806789", "slfsrv_data_reporting")
+    requests_dir = tmp_path / "requests"
+    requests_dir.mkdir()
+    (requests_dir / "existing.json").write_text(json.dumps(existing), encoding="utf-8")
+
+    with pytest.raises(generator.DuplicateSchemaTargetError) as captured:
+        generator.build_shared_tfvars_payload(
+            current,
+            existing_request_ids={"RITM78067"},
+            requests_directory=requests_dir,
+        )
+
+    assert captured.value.markdown() == "\n".join(
+        [
+            "## Schema Request Rejected",
+            "",
+            "- Request: RITM7806789",
+            "- Schema: edlbi_ss.slfsrv_data_reporting",
+            "- Existing owner: RITM78067",
+            "- Status: Duplicate schema target",
+            "- Action: Choose a unique schema name or submit an object-access request",
+        ]
+    )

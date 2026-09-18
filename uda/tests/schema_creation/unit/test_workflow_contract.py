@@ -88,6 +88,17 @@ def test_local_validation_runs_before_cloud_setup() -> None:
     assert names.index("Validate deployment environment") < names.index("Setup Azure and Databricks")
 
 
+def test_shared_setup_masks_keyvault_databricks_secret() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    action_text = (repo_root / ".github" / "workflows" / "setup-dbxtf-env" / "action.yml").read_text(
+        encoding="utf-8"
+    )
+
+    mask_position = action_text.index('echo "::add-mask::$DBX_CLIENT_SECRET"')
+    export_position = action_text.index('echo "TF_VAR_databricks_client_secret=$DBX_CLIENT_SECRET"')
+    assert mask_position < export_position
+
+
 def test_schema_workflow_uses_repo_root_paths_for_plan_files() -> None:
     workflow = _workflow()
     plan_step = next(

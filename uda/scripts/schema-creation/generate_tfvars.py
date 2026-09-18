@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -46,6 +47,30 @@ DECLARED_TFVARS_KEYS = [
     "governance_approval_required",
     "ad_approval_required",
 ]
+
+
+class DuplicateSchemaTargetError(ValueError):
+    """Raised when a new request targets a schema already owned in state."""
+
+    def __init__(self, *, request_id: str, target: dict[str, Any], existing_request_id: str) -> None:
+        self.request_id = request_id
+        self.catalog = str(target["target_catalog"])
+        self.schema = str(target["target_schema_name"])
+        self.existing_request_id = existing_request_id
+        super().__init__(f"{self.catalog}.{self.schema} is already owned by {existing_request_id}")
+
+    def markdown(self) -> str:
+        return "\n".join(
+            [
+                "## Schema Request Rejected",
+                "",
+                f"- Request: {self.request_id}",
+                f"- Schema: {self.catalog}.{self.schema}",
+                f"- Existing owner: {self.existing_request_id}",
+                "- Status: Duplicate schema target",
+                "- Action: Choose a unique schema name or submit an object-access request",
+            ]
+        )
 
 
 def _normalize(value: Any) -> str:
@@ -245,8 +270,10 @@ def build_shared_tfvars_payload(
     for target_key, target in _build_schema_targets(current_payload).items():
         existing = request_map.get(target_key)
         if existing is not None and existing["request_id"] != current_request_id:
-            raise ValueError(
-                f"Schema target {target_key} is already owned by request {existing['request_id']}"
+            raise DuplicateSchemaTargetError(
+                request_id=current_request_id,
+                target=target,
+                existing_request_id=str(existing["request_id"]),
             )
         request_map[target_key] = target
     return {
@@ -310,6 +337,14 @@ def main() -> int:
             tfvars_payload = build_tfvars_payload(normalized_payload)
         tfvars_payload = _prune_to_declared_vars(tfvars_payload, variables_file)
         _validate_contract_with_terraform(tfvars_payload, variables_file)
+    except DuplicateSchemaTargetError as exc:
+        message = exc.markdown()
+        print(message, file=sys.stderr)
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_path:
+            with Path(summary_path).open("a", encoding="utf-8") as summary:
+                summary.write(message + "\n")
+        return 1
     except Exception as exc:  # pylint: disable=broad-except
         print(f"tfvars generation failed: {exc}", file=sys.stderr)
         return 1
