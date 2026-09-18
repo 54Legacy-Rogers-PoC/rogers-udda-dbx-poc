@@ -132,6 +132,35 @@ module "cluster_ad_group_remove" {
   remove_records = local.cluster_ad_group_remove_records
 }
 
+locals {
+  schema_environment_mapping = yamldecode(file("${path.root}/../../../uda/config/environment-mapping.yaml"))
+  communitymart_catalog_grant_specs = toset([
+    for request in values(var.schema_creation_requests) : jsonencode({
+      catalog = lower(trimspace(try(
+        yamldecode(file("${path.root}/../../../${local.schema_environment_mapping.config_files[upper(trimspace(request.environment))]}")).schema_creation.communitymart_catalog_name,
+        ""
+      )))
+      principal = lower(trimspace(request.ad_group_name))
+    })
+    if request.create_communitymart_schema && trimspace(request.ad_group_name) != ""
+  ])
+  communitymart_catalog_grants = {
+    for encoded in local.communitymart_catalog_grant_specs :
+    "${jsondecode(encoded).catalog}|${jsondecode(encoded).principal}" => jsondecode(encoded)
+    if jsondecode(encoded).catalog != ""
+  }
+}
+
+# Catalog traversal is shared by every schema request for the same AD group.
+# Schema-specific permissions remain owned by each request module.
+resource "databricks_grant" "communitymart_ad_group_catalog" {
+  for_each = local.communitymart_catalog_grants
+
+  catalog    = each.value.catalog
+  principal  = each.value.principal
+  privileges = ["USE_CATALOG"]
+}
+
 # Schema creation runs through the same root stack pattern as the other DDD
 # workflows and is enabled only for schema-creation requests.
 module "schema_creation" {

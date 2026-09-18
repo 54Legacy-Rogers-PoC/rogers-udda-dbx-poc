@@ -76,6 +76,33 @@ def test_schema_workflow_preserves_state_backed_request_keys() -> None:
     assert "--requests-directory requests/schema-creation" in generate_step["run"]
 
 
+def test_schema_workflow_migrates_catalog_grants_to_shared_ownership() -> None:
+    workflow = _workflow()
+    plan_job = workflow["jobs"]["plan-schema-creation"]
+    migration_step = next(
+        step for step in plan_job["steps"] if step.get("name") == "Migrate shared community mart catalog grants"
+    )
+
+    run_text = migration_step["run"]
+    assert "communitymart_ad_group_catalog" in run_text
+    assert "state rm" in run_text
+    assert "state mv" in run_text
+    assert "Databricks permission is unchanged" in run_text
+    assert " import " not in run_text
+
+
+def test_communitymart_catalog_grants_are_owned_once_at_root() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    root_main = (repo_root / "terraform" / "environments" / "dev" / "main.tf").read_text(encoding="utf-8")
+    module_main = (repo_root / "terraform" / "modules" / "schema_creation" / "main.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'resource "databricks_grant" "communitymart_ad_group_catalog"' in root_main
+    assert '"${jsondecode(encoded).catalog}|${jsondecode(encoded).principal}"' in root_main
+    assert 'resource "databricks_grant" "communitymart_ad_group_catalog"' not in module_main
+
+
 def test_root_outputs_do_not_expand_all_schema_instances() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     outputs = (repo_root / "terraform" / "environments" / "dev" / "outputs.tf").read_text(

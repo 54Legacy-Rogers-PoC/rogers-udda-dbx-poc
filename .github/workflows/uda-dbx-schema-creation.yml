@@ -181,6 +181,34 @@ jobs:
             --requests-directory requests/schema-creation \
             --terraform-variables-file terraform/environments/dev/variables.tf
 
+      - name: Migrate shared community mart catalog grants
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r legacy_address; do
+            state_values="$(terraform -chdir="$TF_WORKDIR" state show -no-color "$legacy_address")"
+            catalog="$(printf '%s\n' "$state_values" | sed -n 's/^ *catalog *= *"\([^"]*\)".*/\1/p' | head -n 1)"
+            principal="$(printf '%s\n' "$state_values" | sed -n 's/^ *principal *= *"\([^"]*\)".*/\1/p' | head -n 1)"
+
+            if [ -z "$catalog" ] || [ -z "$principal" ]; then
+              echo "Cannot read catalog grant identity from $legacy_address" >&2
+              exit 1
+            fi
+
+            key="${catalog,,}|${principal,,}"
+            canonical_address="databricks_grant.communitymart_ad_group_catalog[\"$key\"]"
+            if terraform -chdir="$TF_WORKDIR" state list | grep -Fxq "$canonical_address"; then
+              echo "Removing duplicate state reference $legacy_address; Databricks permission is unchanged."
+              terraform -chdir="$TF_WORKDIR" state rm "$legacy_address"
+            else
+              echo "Moving $legacy_address to $canonical_address; Databricks permission is unchanged."
+              terraform -chdir="$TF_WORKDIR" state mv "$legacy_address" "$canonical_address"
+            fi
+          done < <(
+            terraform -chdir="$TF_WORKDIR" state list |
+              grep -E '^module\.schema_creation\["[^"]+"\]\.databricks_grant\.communitymart_ad_group_catalog\[0\]$' || true
+          )
+
       - name: Terraform plan
         run: |
           terraform -chdir="$TF_WORKDIR" plan \

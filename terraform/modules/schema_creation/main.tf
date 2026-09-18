@@ -248,11 +248,3 @@ resource "databricks_grant" "communitymart_ad_group_schema" {
   principal  = local.ad_group_name
   privileges = ["USE_SCHEMA"]
 }
-
-resource "databricks_grant" "communitymart_ad_group_catalog" {
-  count = local.create_communitymart_schema ? 1 : 0
-
-  catalog    = local.communitymart_catalog_name
-  principal  = local.ad_group_name
-  privileges = ["USE_CATALOG"]
-}
