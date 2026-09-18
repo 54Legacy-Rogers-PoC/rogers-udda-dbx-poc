@@ -47,11 +47,11 @@ if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
     done <<< "${REQUEST_FILES_INPUT}"
   fi
 else
-  # Push/PR runs only process files that were newly added in the diff.
+  # Push/PR runs process newly added requests and corrections to existing requests.
   if [ -n "${BASE_SHA_EVENT:-}" ] && [ -n "${HEAD_SHA_EVENT:-}" ]; then
     while IFS= read -r changed; do
       add_request "$changed"
-    done < <(git diff --name-only --diff-filter=A "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" || true)
+    done < <(git diff --name-only --diff-filter=AM "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" || true)
   fi
 fi
 

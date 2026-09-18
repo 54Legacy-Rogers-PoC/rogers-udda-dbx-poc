@@ -53,7 +53,7 @@ runs:
         [[ "$AZURE_SUBSCRIPTION_ID" =~ $guid_regex ]] || { echo "ERROR: AZURE_SUBSCRIPTION_ID must be a GUID subscription ID."; exit 1; }
 
     - name: Azure Login
-      uses: azure/login@v2
+      uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
       with:
         creds: >-
           {
@@ -149,7 +149,6 @@ runs:
         TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
         TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA)
         TFSTATE_KEY_BASE=$(get_kv_secret "TF state key" TFSTATE-KEY-DBX)
-        TFSTATE_ACCESS_KEY=$(try_kv_secret TFSTATE-ACCESS-KEY TFSTATE_ACCESS_KEY || true)
 
         TFSTATE_KEY_OVERRIDE="${{ inputs.tfstate_key_override }}"
         TFSTATE_KEY_SUFFIX="${{ inputs.tfstate_key_suffix }}"
@@ -171,13 +170,11 @@ runs:
         echo "TFSTATE_STORAGE_ACCOUNT=$TFSTATE_SA" >> "$GITHUB_ENV"
         echo "TFSTATE_CONTAINER=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
         echo "TFSTATE_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
-        echo "TFSTATE_ACCESS_KEY=$TFSTATE_ACCESS_KEY" >> "$GITHUB_ENV"
 
         echo "TF_BACKEND_RESOURCE_GROUP_NAME=$TFSTATE_RG" >> "$GITHUB_ENV"
         echo "TF_BACKEND_STORAGE_ACCOUNT_NAME=$TFSTATE_SA" >> "$GITHUB_ENV"
         echo "TF_BACKEND_CONTAINER_NAME=$TFSTATE_CONTAINER" >> "$GITHUB_ENV"
         echo "TF_BACKEND_KEY=$TFSTATE_KEY" >> "$GITHUB_ENV"
-        echo "TF_BACKEND_ACCESS_KEY=" >> "$GITHUB_ENV"
         echo "TF_BACKEND_USE_AZUREAD_AUTH=true" >> "$GITHUB_ENV"
 
         echo "ARM_CLIENT_ID=${AZURE_CLIENT_ID}" >> "$GITHUB_ENV"

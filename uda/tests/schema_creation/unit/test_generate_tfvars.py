@@ -66,3 +66,18 @@ def test_build_shared_payload_fails_when_state_request_has_no_source(tmp_path: P
             existing_request_ids={"RITM-MISSING"},
             requests_directory=tmp_path,
         )
+
+
+def test_build_shared_payload_rejects_mixed_environments(tmp_path: Path) -> None:
+    existing = _normalized("RITM-OLD", "slfsrv_old_schema")
+    existing["environment"] = "DEV"
+    requests_dir = tmp_path / "requests"
+    requests_dir.mkdir()
+    (requests_dir / "old.json").write_text(json.dumps(existing), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="cannot mix environments"):
+        generator.build_shared_tfvars_payload(
+            _normalized("RITM-NEW", "slfsrv_new_schema"),
+            existing_request_ids={"RITM-OLD"},
+            requests_directory=requests_dir,
+        )

@@ -40,6 +40,32 @@ def test_schema_workflow_uses_shared_root_stack() -> None:
     assert "Terraform init" not in step_text
 
 
+def test_pull_requests_validate_without_cloud_or_state_access() -> None:
+    workflow = _workflow()
+    plan_job = workflow["jobs"]["plan-schema-creation"]
+    validation_job = workflow["jobs"]["validate-schema-request"]
+
+    assert "github.event_name != 'pull_request'" in plan_job["if"]
+    assert "github.event_name == 'pull_request'" in validation_job["if"]
+    validation_text = str(validation_job["steps"])
+    assert "validate_request.py" in validation_text
+    assert "validate_environment_config.py" in validation_text
+    assert "Setup Azure and Databricks" not in validation_text
+    assert "terraform" not in validation_text.lower()
+
+
+def test_deployment_is_main_only_and_uses_protected_environment() -> None:
+    workflow = _workflow()
+    assert workflow[True]["push"]["branches"] == ["main"]
+    assert workflow["jobs"]["plan-schema-creation"]["environment"] == "schema-creation-production"
+
+
+def test_local_validation_runs_before_cloud_setup() -> None:
+    steps = _workflow()["jobs"]["plan-schema-creation"]["steps"]
+    names = [step.get("name") for step in steps]
+    assert names.index("Validate deployment environment") < names.index("Setup Azure and Databricks")
+
+
 def test_schema_workflow_uses_repo_root_paths_for_plan_files() -> None:
     workflow = _workflow()
     plan_step = next(

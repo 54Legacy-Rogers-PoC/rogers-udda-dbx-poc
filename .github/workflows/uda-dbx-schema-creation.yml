@@ -4,12 +4,11 @@ on:
   push:
     branches:
       - main
-      - feature/furqan-udda
     paths:
       - "requests/schema-creation/dev/**"
   pull_request:
     branches:
-      - feature/furqan-udda
+      - main
     paths:
       - "requests/schema-creation/dev/**"
   workflow_dispatch:
@@ -73,8 +72,9 @@ jobs:
 
   plan-schema-creation:
     needs: [detect-requests]
-    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
+    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
     runs-on: ubuntu-latest
+    environment: schema-creation-production
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -88,16 +88,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Setup Azure and Databricks
-        uses: ./.github/workflows/setup-dbxtf-env
-        with:
-          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
-          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
-          tfstate_key_suffix: schema-creation
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -137,17 +127,29 @@ jobs:
             --request-file "$REQUEST_FILE" \
             --output-json "$NORMALIZED_JSON"
 
-      - name: Ensure sandbox ADLS container exists
+      - name: Validate deployment environment
+        run: |
+          python uda/scripts/schema-creation/validate_environment_config.py \
+            --request-json "$NORMALIZED_JSON"
+
+      - name: Setup Azure and Databricks
+        uses: ./.github/workflows/setup-dbxtf-env
+        with:
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          tfstate_key_suffix: schema-creation
+
+      - name: Back up Terraform state before migration
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
         shell: bash
-        env:
-          NORMALIZED_JSON: ${{ env.NORMALIZED_JSON }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
-          # Keep environment-specific storage resolution in a helper so workflow YAML stays readable.
-          bash uda/scripts/schema-creation/ensure_sandbox_container.sh
+          terraform -chdir="$TF_WORKDIR" state pull > "$OUTPUT_DIR/pre-migration-state.json"
 
       - name: Migrate legacy schema state address
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
         shell: bash
         run: |
           set -euo pipefail
@@ -182,6 +184,7 @@ jobs:
             --terraform-variables-file terraform/environments/dev/variables.tf
 
       - name: Migrate shared community mart catalog grants
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
         shell: bash
         run: |
           set -euo pipefail
@@ -198,6 +201,13 @@ jobs:
             key="${catalog,,}|${principal,,}"
             canonical_address="databricks_grant.communitymart_ad_group_catalog[\"$key\"]"
             if terraform -chdir="$TF_WORKDIR" state list | grep -Fxq "$canonical_address"; then
+              legacy_id="$(printf '%s\n' "$state_values" | sed -n 's/^ *id *= *"\([^"]*\)".*/\1/p' | head -n 1)"
+              canonical_values="$(terraform -chdir="$TF_WORKDIR" state show -no-color "$canonical_address")"
+              canonical_id="$(printf '%s\n' "$canonical_values" | sed -n 's/^ *id *= *"\([^"]*\)".*/\1/p' | head -n 1)"
+              if [ -z "$legacy_id" ] || [ "$legacy_id" != "$canonical_id" ]; then
+                echo "Refusing to remove $legacy_address because its remote ID differs from $canonical_address." >&2
+                exit 1
+              fi
               echo "Removing duplicate state reference $legacy_address; Databricks permission is unchanged."
               terraform -chdir="$TF_WORKDIR" state rm "$legacy_address"
             else
@@ -235,6 +245,15 @@ jobs:
             exit 1
           fi
 
+      - name: Ensure sandbox ADLS container exists
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
+        shell: bash
+        env:
+          NORMALIZED_JSON: ${{ env.NORMALIZED_JSON }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          bash uda/scripts/schema-creation/ensure_sandbox_container.sh
+
       - name: Terraform apply
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         run: |
@@ -258,6 +277,37 @@ jobs:
             echo "- Plan text: $TFPLAN_TXT"
             echo "- Backend key: $TF_BACKEND_KEY"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  validate-schema-request:
+    needs: [detect-requests]
+    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-requests.outputs.matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install validation dependencies
+        run: |
+          pip install --only-binary=:all: pyyaml==6.0.2
+
+      - name: Validate request and deployment configuration without cloud access
+        run: |
+          python uda/scripts/schema-creation/validate_request.py \
+            --request-file "${{ matrix.request_file }}"
+          python uda/scripts/schema-creation/normalize_request.py \
+            --request-file "${{ matrix.request_file }}" \
+            --output-json "$RUNNER_TEMP/schema-request.json"
+          python uda/scripts/schema-creation/validate_environment_config.py \
+            --request-json "$RUNNER_TEMP/schema-request.json"
 
   post-validate-schema-creation:
     needs: [detect-requests, plan-schema-creation]

@@ -161,6 +161,7 @@ def build_shared_tfvars_payload(
     current_request_id = current_values["request_id"]
     request_index = _load_request_index(requests_directory) if existing_request_ids else {}
     request_map: dict[str, dict[str, Any]] = {}
+    current_environment = _normalize(current_values["environment"]).upper()
 
     for request_id in sorted(existing_request_ids - {current_request_id}):
         normalized = request_index.get(request_id)
@@ -168,7 +169,14 @@ def build_shared_tfvars_payload(
             raise ValueError(
                 f"State-backed schema request {request_id} has no matching source under {requests_directory}"
             )
-        request_map[request_id] = _build_request_values(normalized)
+        existing_values = _build_request_values(normalized)
+        existing_environment = _normalize(existing_values["environment"]).upper()
+        if existing_environment != current_environment:
+            raise ValueError(
+                "Shared schema state cannot mix environments: "
+                f"current request is {current_environment}, but {request_id} is {existing_environment}"
+            )
+        request_map[request_id] = existing_values
 
     request_map[current_request_id] = current_values
     return {
