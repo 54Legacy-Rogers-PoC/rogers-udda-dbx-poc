@@ -19,10 +19,10 @@ output "schema_targets" {
 output "schema_creation_result" {
   description = "Planned or created schema fully-qualified names and enablement flags."
   value = {
-    sandbox_enabled = local.sandbox_mode == "new"
-    sandbox_fqn     = local.sandbox_mode == "new" ? format("%s.%s", local.sandbox_catalog_name, local.sandbox_schema_name) : ""
+    sandbox_enabled = local.manage_sandbox
+    sandbox_fqn     = local.manage_sandbox ? format("%s.%s", local.sandbox_catalog_name, local.sandbox_schema_name) : ""
 
-    communitymart_enabled = local.create_communitymart_schema
-    communitymart_fqn     = local.create_communitymart_schema ? format("%s.%s", local.communitymart_catalog_name, local.communitymart_schema_name) : ""
+    communitymart_enabled = local.manage_communitymart
+    communitymart_fqn     = local.manage_communitymart ? format("%s.%s", local.communitymart_catalog_name, local.communitymart_schema_name) : ""
   }
 }

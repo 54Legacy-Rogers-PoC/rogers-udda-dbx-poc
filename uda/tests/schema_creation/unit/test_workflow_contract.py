@@ -40,24 +40,46 @@ def test_schema_workflow_uses_shared_root_stack() -> None:
     assert "Terraform init" not in step_text
 
 
-def test_pull_requests_validate_without_cloud_or_state_access() -> None:
+def test_pull_requests_run_plan_but_never_apply_or_mutate_state() -> None:
     workflow = _workflow()
     plan_job = workflow["jobs"]["plan-schema-creation"]
-    validation_job = workflow["jobs"]["validate-schema-request"]
+    assert "github.event_name != 'pull_request'" not in plan_job["if"]
 
-    assert "github.event_name != 'pull_request'" in plan_job["if"]
-    assert "github.event_name == 'pull_request'" in validation_job["if"]
-    validation_text = str(validation_job["steps"])
-    assert "validate_request.py" in validation_text
-    assert "validate_environment_config.py" in validation_text
-    assert "Setup Azure and Databricks" not in validation_text
-    assert "terraform" not in validation_text.lower()
+    steps = {step.get("name"): step for step in plan_job["steps"]}
+    assert "Terraform plan" in steps
+    assert "if" not in steps["Terraform plan"]
+    for name in (
+        "Back up Terraform state before migration",
+        "Migrate legacy schema state address",
+        "Migrate shared community mart catalog grants",
+        "Ensure sandbox ADLS container exists",
+        "Terraform apply",
+    ):
+        condition = steps[name]["if"]
+        assert "github.event_name == 'push'" in condition
+        assert "inputs.run_apply" in condition
+
+
+def test_workflow_has_no_removal_override_and_rejects_delete_actions() -> None:
+    workflow = _workflow()
+    dispatch_inputs = workflow[True]["workflow_dispatch"]["inputs"]
+    assert "allow_destroy" not in dispatch_inputs
+
+    steps = workflow["jobs"]["plan-schema-creation"]["steps"]
+    policy_step = next(step for step in steps if step.get("name") == "Enforce create-or-update-only plan")
+    run_text = policy_step["run"]
+    assert 'index("delete")' in run_text
+    assert "ALLOW_DESTROY" not in run_text
+    assert "allow_destroy" not in run_text
+    assert 'if [ "$removal_count" -gt 0 ]' in run_text
 
 
 def test_deployment_is_main_only_and_uses_protected_environment() -> None:
     workflow = _workflow()
     assert workflow[True]["push"]["branches"] == ["main"]
-    assert workflow["jobs"]["plan-schema-creation"]["environment"] == "schema-creation-production"
+    environment = workflow["jobs"]["plan-schema-creation"]["environment"]
+    assert "schema-creation-plan" in environment
+    assert "schema-creation-production" in environment
 
 
 def test_local_validation_runs_before_cloud_setup() -> None:
@@ -115,6 +137,20 @@ def test_schema_workflow_migrates_catalog_grants_to_shared_ownership() -> None:
     assert "state mv" in run_text
     assert "Databricks permission is unchanged" in run_text
     assert " import " not in run_text
+
+
+def test_schema_workflow_migrates_request_keys_to_schema_target_keys() -> None:
+    workflow = _workflow()
+    steps = workflow["jobs"]["plan-schema-creation"]["steps"]
+    migration_step = next(
+        step for step in steps if step.get("name") == "Migrate schema resources to stable target keys"
+    )
+
+    assert "migrate_schema_state_keys.py" in migration_step["run"]
+    assert "--tfvars-json" in migration_step["run"]
+    assert "--state-addresses-file" in migration_step["run"]
+    assert "--output-file" in migration_step["run"]
+    assert "if" not in migration_step
 
 
 def test_communitymart_catalog_grants_are_owned_once_at_root() -> None:

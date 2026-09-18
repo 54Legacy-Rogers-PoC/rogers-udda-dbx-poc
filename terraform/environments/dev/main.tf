@@ -168,6 +168,7 @@ module "schema_creation" {
 
   source = "../../modules/schema_creation"
 
+  target_type                             = each.value.target_type
   request_id                              = each.value.request_id
   environment                             = each.value.environment
   sandbox_mode                            = each.value.sandbox_mode

@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[2]
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -126,6 +127,49 @@ def _build_request_values(normalized_payload: dict[str, Any]) -> dict[str, Any]:
     return request_values
 
 
+def _schema_catalogs(environment: str) -> dict[str, str]:
+    mapping_path = REPO_ROOT / "uda" / "config" / "environment-mapping.yaml"
+    mapping = yaml.safe_load(mapping_path.read_text(encoding="utf-8")) or {}
+    config_path = _normalize(mapping.get("config_files", {}).get(environment.upper()))
+    if not config_path:
+        raise ValueError(f"No environment configuration found for {environment}")
+
+    config = yaml.safe_load((REPO_ROOT / config_path).read_text(encoding="utf-8")) or {}
+    schema_config = config.get("schema_creation") or {}
+    catalogs = {
+        "sandbox": _normalize(schema_config.get("sandbox_catalog_name")).lower(),
+        "communitymart": _normalize(schema_config.get("communitymart_catalog_name")).lower(),
+    }
+    missing = sorted(target_type for target_type, catalog in catalogs.items() if not catalog)
+    if missing:
+        raise ValueError(f"Missing schema catalogs for {environment}: {', '.join(missing)}")
+    return catalogs
+
+
+def _build_schema_targets(normalized_payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    values = _build_request_values(normalized_payload)
+    environment = _normalize(values["environment"]).upper()
+    catalogs = _schema_catalogs(environment)
+    targets: dict[str, dict[str, Any]] = {}
+
+    target_specs = [
+        ("sandbox", values["sandbox_mode"] == "new", values["sandbox_schema_name"]),
+        ("communitymart", values["create_communitymart_schema"], values["communitymart_schema_name"]),
+    ]
+    for target_type, enabled, schema_name in target_specs:
+        if not enabled:
+            continue
+        catalog = catalogs[target_type]
+        key = f"{environment}|{catalog}|{_normalize(schema_name).lower()}"
+        targets[key] = {
+            **values,
+            "target_type": target_type,
+            "target_catalog": catalog,
+            "target_schema_name": _normalize(schema_name).lower(),
+        }
+    return targets
+
+
 def _load_request_index(requests_directory: Path) -> dict[str, dict[str, Any]]:
     request_index: dict[str, dict[str, Any]] = {}
     paths = sorted(requests_directory.rglob("*.yml")) + sorted(requests_directory.rglob("*.yaml"))
@@ -160,25 +204,51 @@ def build_shared_tfvars_payload(
     current_values = _build_request_values(current_payload)
     current_request_id = current_values["request_id"]
     request_index = _load_request_index(requests_directory) if existing_request_ids else {}
+    target_index: dict[str, list[dict[str, Any]]] = {}
+    for normalized in request_index.values():
+        for key, target in _build_schema_targets(normalized).items():
+            target_index.setdefault(key, []).append(target)
+
     request_map: dict[str, dict[str, Any]] = {}
     current_environment = _normalize(current_values["environment"]).upper()
 
-    for request_id in sorted(existing_request_ids - {current_request_id}):
-        normalized = request_index.get(request_id)
-        if normalized is None:
+    for state_key in sorted(existing_request_ids):
+        if state_key == current_request_id:
+            existing_targets = _build_schema_targets(current_payload)
+        elif state_key in request_index:
+            existing_targets = _build_schema_targets(request_index[state_key])
+        elif state_key in target_index:
+            matches = target_index[state_key]
+            if len(matches) != 1:
+                owners = ", ".join(sorted(str(target["request_id"]) for target in matches))
+                raise ValueError(f"State-backed schema target {state_key} has multiple request sources: {owners}")
+            existing_targets = {state_key: matches[0]}
+        else:
             raise ValueError(
-                f"State-backed schema request {request_id} has no matching source under {requests_directory}"
+                f"State-backed schema key {state_key} has no matching source under {requests_directory}"
             )
-        existing_values = _build_request_values(normalized)
-        existing_environment = _normalize(existing_values["environment"]).upper()
-        if existing_environment != current_environment:
-            raise ValueError(
-                "Shared schema state cannot mix environments: "
-                f"current request is {current_environment}, but {request_id} is {existing_environment}"
-            )
-        request_map[request_id] = existing_values
 
-    request_map[current_request_id] = current_values
+        for target_key, target in existing_targets.items():
+            existing_environment = _normalize(target["environment"]).upper()
+            if existing_environment != current_environment:
+                raise ValueError(
+                    "Shared schema state cannot mix environments: "
+                    f"current request is {current_environment}, but {target['request_id']} is {existing_environment}"
+                )
+            existing = request_map.get(target_key)
+            if existing is not None and existing["request_id"] != target["request_id"]:
+                raise ValueError(
+                    f"Schema target {target_key} is declared by both {existing['request_id']} and {target['request_id']}"
+                )
+            request_map[target_key] = target
+
+    for target_key, target in _build_schema_targets(current_payload).items():
+        existing = request_map.get(target_key)
+        if existing is not None and existing["request_id"] != current_request_id:
+            raise ValueError(
+                f"Schema target {target_key} is already owned by request {existing['request_id']}"
+            )
+        request_map[target_key] = target
     return {
         "schema_creation_enabled": True,
         **current_values,
@@ -192,14 +262,7 @@ def build_tfvars_payload(normalized_payload: dict[str, Any]) -> dict[str, Any]:
         **_build_request_values(normalized_payload),
     }
 
-    request_id = tfvars_payload["request_id"]
-    tfvars_payload["schema_creation_requests"] = {
-        request_id: {
-            key: value
-            for key, value in tfvars_payload.items()
-            if key not in {"schema_creation_enabled", "schema_creation_requests"}
-        }
-    }
+    tfvars_payload["schema_creation_requests"] = _build_schema_targets(normalized_payload)
 
     return tfvars_payload
 

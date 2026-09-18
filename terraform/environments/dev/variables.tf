@@ -94,8 +94,11 @@ variable "schema_creation_enabled" {
 }
 
 variable "schema_creation_requests" {
-  description = "Schema creation requests keyed by stable request ID"
+  description = "Schema creation targets keyed by environment, catalog, and schema name"
   type = map(object({
+    target_type                             = string
+    target_catalog                          = string
+    target_schema_name                      = string
     request_id                              = string
     environment                             = string
     sandbox_mode                            = string

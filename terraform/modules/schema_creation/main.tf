@@ -1,4 +1,5 @@
 locals {
+  target_type             = lower(trimspace(var.target_type))
   request_id              = trimspace(var.request_id)
   environment             = upper(trimspace(var.environment))
   sandbox_mode            = lower(trimspace(var.sandbox_mode))
@@ -44,18 +45,20 @@ locals {
   assignment_group       = trimspace(var.assignment_group)
   epdg_ticket_url        = trimspace(var.epdg_ticket_url)
 
-  sandbox_schema_required = local.sandbox_mode == "new"
+  manage_sandbox          = local.target_type == "sandbox" && local.sandbox_mode == "new"
+  manage_communitymart    = local.target_type == "communitymart" && local.create_communitymart_schema
+  sandbox_schema_required = local.manage_sandbox
   sandbox_schema_valid    = !local.sandbox_schema_required || local.sandbox_schema_name != ""
 
-  communitymart_schema_valid = !local.create_communitymart_schema || local.communitymart_schema_name != ""
-  communitymart_owner_valid  = !local.create_communitymart_schema || local.communitymart_owner_name != ""
+  communitymart_schema_valid = !local.manage_communitymart || local.communitymart_schema_name != ""
+  communitymart_owner_valid  = !local.manage_communitymart || local.communitymart_owner_name != ""
   ad_group_valid             = local.ad_group_name != ""
 
   request_targets = concat(
     [
       {
         type    = "sandbox"
-        enabled = local.sandbox_mode == "new"
+        enabled = local.manage_sandbox
         name    = local.sandbox_schema_name
         owner   = local.sandbox_owner_name
       }
@@ -63,7 +66,7 @@ locals {
     [
       {
         type    = "communitymart"
-        enabled = local.create_communitymart_schema
+        enabled = local.manage_communitymart
         name    = local.communitymart_schema_name
         owner   = local.communitymart_owner_name
       }
@@ -118,7 +121,7 @@ check "schema_creation_environment_config_complete" {
 }
 
 resource "databricks_schema" "sandbox" {
-  count = local.sandbox_mode == "new" ? 1 : 0
+  count = local.manage_sandbox ? 1 : 0
 
   depends_on = [
     databricks_external_location.sandbox,
@@ -136,7 +139,7 @@ resource "databricks_schema" "sandbox" {
 }
 
 resource "databricks_external_location" "sandbox" {
-  count = local.sandbox_mode == "new" ? 1 : 0
+  count = local.manage_sandbox ? 1 : 0
 
   name            = local.sandbox_external_location_name
   url             = local.sandbox_external_location_url
@@ -151,7 +154,7 @@ resource "databricks_external_location" "sandbox" {
 }
 
 resource "databricks_grants" "sandbox_external_location_access" {
-  count = local.sandbox_mode == "new" ? 1 : 0
+  count = local.manage_sandbox ? 1 : 0
 
   external_location = databricks_external_location.sandbox[0].name
 
@@ -174,7 +177,7 @@ resource "databricks_grants" "sandbox_external_location_access" {
 }
 
 resource "databricks_grant" "sandbox_owner" {
-  count = local.sandbox_mode == "new" ? 1 : 0
+  count = local.manage_sandbox ? 1 : 0
 
   depends_on = [
     databricks_schema.sandbox,
@@ -193,7 +196,7 @@ resource "databricks_grant" "sandbox_owner" {
 }
 
 resource "databricks_grant" "sandbox_ad_group" {
-  count = local.sandbox_mode == "new" && local.ad_group_name != local.sandbox_owner_name ? 1 : 0
+  count = local.manage_sandbox && local.ad_group_name != local.sandbox_owner_name ? 1 : 0
 
   depends_on = [
     databricks_schema.sandbox,
@@ -205,7 +208,7 @@ resource "databricks_grant" "sandbox_ad_group" {
 }
 
 resource "databricks_schema" "communitymart" {
-  count = local.create_communitymart_schema ? 1 : 0
+  count = local.manage_communitymart ? 1 : 0
 
   catalog_name = local.communitymart_catalog_name
   name         = local.communitymart_schema_name
@@ -219,7 +222,7 @@ resource "databricks_schema" "communitymart" {
 }
 
 resource "databricks_grant" "communitymart_owner" {
-  count = local.create_communitymart_schema ? 1 : 0
+  count = local.manage_communitymart ? 1 : 0
 
   depends_on = [
     databricks_schema.communitymart,
@@ -238,7 +241,7 @@ resource "databricks_grant" "communitymart_owner" {
 }
 
 resource "databricks_grant" "communitymart_ad_group_schema" {
-  count = local.create_communitymart_schema && local.ad_group_name != local.communitymart_owner_name ? 1 : 0
+  count = local.manage_communitymart && local.ad_group_name != local.communitymart_owner_name ? 1 : 0
 
   depends_on = [
     databricks_schema.communitymart,

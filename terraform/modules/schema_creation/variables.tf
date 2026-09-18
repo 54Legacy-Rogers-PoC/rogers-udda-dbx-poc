@@ -1,3 +1,13 @@
+variable "target_type" {
+  description = "Schema target type: sandbox or communitymart."
+  type        = string
+
+  validation {
+    condition     = contains(["sandbox", "communitymart"], var.target_type)
+    error_message = "target_type must be sandbox or communitymart."
+  }
+}
+
 variable "request_id" {
   description = "Request identifier from Request-as-Code YAML (e.g., RITM123456)."
   type        = string

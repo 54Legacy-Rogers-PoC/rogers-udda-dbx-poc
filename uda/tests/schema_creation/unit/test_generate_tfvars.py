@@ -55,8 +55,13 @@ def test_build_shared_payload_preserves_existing_request(tmp_path: Path) -> None
         requests_directory=requests_dir,
     )
 
-    assert set(payload["schema_creation_requests"]) == {"RITM-OLD", "RITM-NEW"}
-    assert payload["schema_creation_requests"]["RITM-OLD"]["sandbox_schema_name"] == "slfsrv_old_schema"
+    assert set(payload["schema_creation_requests"]) == {
+        "PRD|edlbi_ss|slfsrv_old_schema",
+        "PRD|edlbi_ss|slfsrv_new_schema",
+    }
+    old_target = payload["schema_creation_requests"]["PRD|edlbi_ss|slfsrv_old_schema"]
+    assert old_target["request_id"] == "RITM-OLD"
+    assert old_target["target_type"] == "sandbox"
 
 
 def test_build_shared_payload_fails_when_state_request_has_no_source(tmp_path: Path) -> None:
