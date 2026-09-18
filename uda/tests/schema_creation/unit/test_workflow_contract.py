@@ -65,6 +65,15 @@ def test_schema_workflow_migrates_legacy_module_address() -> None:
     assert "module.schema_creation[0]" in migration_step["run"]
 
 
+def test_root_outputs_do_not_expand_all_schema_instances() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    outputs = (repo_root / "terraform" / "environments" / "dev" / "outputs.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert "module.schema_creation" not in outputs
+
+
 def test_schema_workflow_uses_repo_root_path_for_apply_file() -> None:
     workflow = _workflow()
     apply_step = next(
