@@ -9,6 +9,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from normalize_request import normalize_payload  # pylint: disable=wrong-import-position
+
 REQUIRED_KEYS = {
     "request_id",
     "environment",
@@ -104,17 +112,77 @@ def _prune_to_declared_vars(tfvars_payload: dict[str, Any], variables_file: Path
     return {k: v for k, v in tfvars_payload.items() if k in declared_vars}
 
 
-def build_tfvars_payload(normalized_payload: dict[str, Any]) -> dict[str, Any]:
-    tfvars_payload: dict[str, Any] = {"schema_creation_enabled": True}
-
+def _build_request_values(normalized_payload: dict[str, Any]) -> dict[str, Any]:
+    request_values: dict[str, Any] = {}
     for key in DECLARED_TFVARS_KEYS:
         if key in {"schema_creation_enabled", "schema_creation_requests"}:
             continue
         value = normalized_payload.get(key)
         if key in {"create_communitymart_schema", "governance_approval_required", "ad_approval_required"}:
-            tfvars_payload[key] = _to_bool(value)
+            request_values[key] = _to_bool(value)
         else:
-            tfvars_payload[key] = _normalize(value)
+            request_values[key] = _normalize(value)
+
+    return request_values
+
+
+def _load_request_index(requests_directory: Path) -> dict[str, dict[str, Any]]:
+    request_index: dict[str, dict[str, Any]] = {}
+    paths = sorted(requests_directory.rglob("*.yml")) + sorted(requests_directory.rglob("*.yaml"))
+    paths += sorted(requests_directory.rglob("*.json"))
+
+    for path in paths:
+        if path.suffix.lower() == ".json":
+            normalized = _load_json(path)
+        else:
+            with path.open("r", encoding="utf-8") as handle:
+                raw_payload = yaml.safe_load(handle)
+            if not isinstance(raw_payload, dict):
+                continue
+            normalized = normalize_payload(raw_payload, path)
+
+        request_id = _normalize(normalized.get("request_id"))
+        if not request_id:
+            continue
+        if request_id in request_index:
+            raise ValueError(f"Duplicate schema request_id found in request sources: {request_id}")
+        request_index[request_id] = normalized
+
+    return request_index
+
+
+def build_shared_tfvars_payload(
+    current_payload: dict[str, Any],
+    *,
+    existing_request_ids: set[str],
+    requests_directory: Path,
+) -> dict[str, Any]:
+    current_values = _build_request_values(current_payload)
+    current_request_id = current_values["request_id"]
+    request_index = _load_request_index(requests_directory) if existing_request_ids else {}
+    request_map: dict[str, dict[str, Any]] = {}
+
+    for request_id in sorted(existing_request_ids - {current_request_id}):
+        normalized = request_index.get(request_id)
+        if normalized is None:
+            raise ValueError(
+                f"State-backed schema request {request_id} has no matching source under {requests_directory}"
+            )
+        request_map[request_id] = _build_request_values(normalized)
+
+    request_map[current_request_id] = current_values
+    return {
+        "schema_creation_enabled": True,
+        **current_values,
+        "schema_creation_requests": request_map,
+    }
+
+
+def build_tfvars_payload(normalized_payload: dict[str, Any]) -> dict[str, Any]:
+    tfvars_payload: dict[str, Any] = {
+        "schema_creation_enabled": True,
+        **_build_request_values(normalized_payload),
+    }
 
     request_id = tfvars_payload["request_id"]
     tfvars_payload["schema_creation_requests"] = {
@@ -133,6 +201,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-json", required=True, help="Path to normalized JSON input")
     parser.add_argument("--output-json", required=True, help="Output tfvars JSON path")
     parser.add_argument(
+        "--existing-request-ids-file",
+        help="Optional file containing request IDs already managed in the shared Terraform state",
+    )
+    parser.add_argument(
+        "--requests-directory",
+        default="requests/schema-creation",
+        help="Request source directory used to reconstruct state-backed request inputs",
+    )
+    parser.add_argument(
         "--terraform-variables-file",
         default="terraform/variables.tf",
         help="Path to Terraform variables.tf used to validate tfvars contract",
@@ -148,7 +225,18 @@ def main() -> int:
 
     try:
         normalized_payload = _load_json(input_json)
-        tfvars_payload = build_tfvars_payload(normalized_payload)
+        if args.existing_request_ids_file:
+            ids_path = Path(args.existing_request_ids_file).resolve()
+            existing_request_ids = {
+                line.strip() for line in ids_path.read_text(encoding="utf-8").splitlines() if line.strip()
+            }
+            tfvars_payload = build_shared_tfvars_payload(
+                normalized_payload,
+                existing_request_ids=existing_request_ids,
+                requests_directory=Path(args.requests_directory).resolve(),
+            )
+        else:
+            tfvars_payload = build_tfvars_payload(normalized_payload)
         tfvars_payload = _prune_to_declared_vars(tfvars_payload, variables_file)
         _validate_contract_with_terraform(tfvars_payload, variables_file)
     except Exception as exc:  # pylint: disable=broad-except

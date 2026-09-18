@@ -49,7 +49,7 @@ def test_schema_workflow_uses_repo_root_paths_for_plan_files() -> None:
 
     assert '-var-file="$GITHUB_WORKSPACE/$TFVARS_JSON"' in run_text
     assert '-out="$GITHUB_WORKSPACE/$TFPLAN_BIN"' in run_text
-    assert '-target="$TF_SCHEMA_TARGET"' in run_text
+    assert "-target=" not in run_text
     assert "../../$TFVARS_JSON" not in run_text
     assert "../../$TFPLAN_BIN" not in run_text
 
@@ -63,6 +63,17 @@ def test_schema_workflow_migrates_legacy_module_address() -> None:
 
     assert "state mv" in migration_step["run"]
     assert "module.schema_creation[0]" in migration_step["run"]
+
+
+def test_schema_workflow_preserves_state_backed_request_keys() -> None:
+    workflow = _workflow()
+    plan_job = workflow["jobs"]["plan-schema-creation"]
+    generate_step = next(step for step in plan_job["steps"] if step.get("name") == "Generate shared-state tfvars")
+
+    assert "terraform" in generate_step["run"]
+    assert "state list" in generate_step["run"]
+    assert "--existing-request-ids-file" in generate_step["run"]
+    assert "--requests-directory requests/schema-creation" in generate_step["run"]
 
 
 def test_root_outputs_do_not_expand_all_schema_instances() -> None:
