@@ -20,11 +20,13 @@ def test_post_validation_job_exists_and_runs_after_apply() -> None:
     steps = post_job["steps"]
     names = [step.get("name") for step in steps]
     assert "Validate live Databricks schema state" in names
-    assert "Persist schema creation status" in names
-    assert names.index("Validate live Databricks schema state") < names.index("Persist schema creation status")
+    assert "Publish validation outputs" in names
+
+    validate_step = next(step for step in steps if step.get("name") == "Validate live Databricks schema state")
+    assert '--output-json "$OUTPUT_DIR/schema-creation-status.json"' in validate_step["run"]
 
 
-def test_schema_workflow_uses_real_terraform_module_path() -> None:
+def test_schema_workflow_uses_shared_root_stack() -> None:
     workflow = _workflow()
     step_text = "\n".join(
         "\n".join(f"{step.get('name', '')}: {step.get('run', '')}" for step in job["steps"])
@@ -32,8 +34,10 @@ def test_schema_workflow_uses_real_terraform_module_path() -> None:
     )
 
     assert "terraform/schema_creation" not in step_text
-    assert "terraform/modules/schema_creation" in step_text
-    assert "--terraform-variables-file terraform/modules/schema_creation/variables.tf" in step_text
+    assert "terraform/modules/schema_creation" not in step_text
+    assert '--terraform-variables-file terraform/environments/dev/variables.tf' in step_text
+    assert 'terraform -chdir="$TF_WORKDIR" plan' in step_text
+    assert "Terraform init" not in step_text
 
 
 def test_schema_workflow_uses_repo_root_paths_for_plan_files() -> None:

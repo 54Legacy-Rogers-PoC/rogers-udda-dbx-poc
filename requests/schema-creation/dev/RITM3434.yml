@@ -10,7 +10,7 @@ governance:
 
 sandbox:
   selection: "New Sandbox"
-  schema_name: "slfsrv_Manoj_basemarketing"
+  schema_name: "slfsrv_manoj_basemarketing"
   owner_name: "furqan@54legacy.com"
 
 communitymart:

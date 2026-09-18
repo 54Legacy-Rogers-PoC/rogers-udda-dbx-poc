@@ -19,6 +19,7 @@ REQUIRED_KEYS = {
 
 # Keep this list aligned with the future schema-creation Terraform root variables.
 DECLARED_TFVARS_KEYS = [
+    "schema_creation_enabled",
     "request_id",
     "environment",
     "sandbox_mode",
@@ -76,12 +77,19 @@ def _validate_contract_with_terraform(tfvars_payload: dict[str, Any], variables_
 
     # Ignore provider auth variables in contract checks. They are injected by workflow env/secrets.
     ignored_missing = {
+        "access_for_types",
+        "activities",
+        "cluster_ad_group_access_records",
         "databricks_host",
         "databricks_token",
         "databricks_client_id",
         "databricks_client_secret",
         "databricks_tenant_id",
+        "databricks_workspace_resource_id",
         "default_external_location_rw_principals",
+        "object_access_records",
+        "record_count",
+        "service_account_cluster_access_records",
     }
     missing_relevant = [k for k in missing_keys if k not in ignored_missing]
 
@@ -95,9 +103,11 @@ def _prune_to_declared_vars(tfvars_payload: dict[str, Any], variables_file: Path
 
 
 def build_tfvars_payload(normalized_payload: dict[str, Any]) -> dict[str, Any]:
-    tfvars_payload: dict[str, Any] = {}
+    tfvars_payload: dict[str, Any] = {"schema_creation_enabled": True}
 
     for key in DECLARED_TFVARS_KEYS:
+        if key == "schema_creation_enabled":
+            continue
         value = normalized_payload.get(key)
         if key in {"create_communitymart_schema", "governance_approval_required", "ad_approval_required"}:
             tfvars_payload[key] = _to_bool(value)
