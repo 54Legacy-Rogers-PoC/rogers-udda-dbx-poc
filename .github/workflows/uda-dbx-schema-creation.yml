@@ -154,10 +154,32 @@ jobs:
             --output-json "$TFVARS_JSON" \
             --terraform-variables-file terraform/environments/dev/variables.tf
 
+          request_key="$(jq -r '.request_id' "$TFVARS_JSON")"
+          echo "TF_SCHEMA_TARGET=module.schema_creation[\"$request_key\"]" >> "$GITHUB_ENV"
+
+      - name: Migrate legacy schema state address
+        shell: bash
+        run: |
+          set -euo pipefail
+          legacy_address='module.schema_creation[0]'
+          if terraform -chdir="$TF_WORKDIR" state list | grep -Fq "$legacy_address."; then
+            legacy_request_id="$(terraform -chdir="$TF_WORKDIR" output -raw request_id)"
+            if [ -z "$legacy_request_id" ]; then
+              echo "Cannot migrate $legacy_address because the legacy request_id output is empty." >&2
+              exit 1
+            fi
+            destination="module.schema_creation[\"$legacy_request_id\"]"
+            echo "Migrating $legacy_address to $destination"
+            terraform -chdir="$TF_WORKDIR" state mv "$legacy_address" "$destination"
+          else
+            echo "Legacy schema module address is not present; migration is not required."
+          fi
+
       - name: Terraform plan
         run: |
           terraform -chdir="$TF_WORKDIR" plan \
             -lock-timeout=10m \
+            -target="$TF_SCHEMA_TARGET" \
             -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
             -out="$GITHUB_WORKSPACE/$TFPLAN_BIN"
 

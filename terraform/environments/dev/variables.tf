@@ -93,6 +93,29 @@ variable "schema_creation_enabled" {
   default     = false
 }
 
+variable "schema_creation_requests" {
+  description = "Schema creation requests keyed by stable request ID"
+  type = map(object({
+    request_id                              = string
+    environment                             = string
+    sandbox_mode                            = string
+    sandbox_schema_name                     = string
+    sandbox_owner_name                      = string
+    default_external_location_rw_principals = optional(list(string), ["furqan@54legacy.com"])
+    create_communitymart_schema             = bool
+    communitymart_schema_name               = string
+    communitymart_owner_name                = string
+    ad_group_name                           = string
+    justification                           = string
+    additional_information                  = string
+    assignment_group                        = string
+    epdg_ticket_url                         = string
+    governance_approval_required            = bool
+    ad_approval_required                    = bool
+  }))
+  default = {}
+}
+
 variable "sandbox_mode" {
   description = "Sandbox action mode for schema-creation requests"
   type        = string

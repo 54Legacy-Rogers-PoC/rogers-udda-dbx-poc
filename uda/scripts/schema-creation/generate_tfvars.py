@@ -20,6 +20,7 @@ REQUIRED_KEYS = {
 # Keep this list aligned with the future schema-creation Terraform root variables.
 DECLARED_TFVARS_KEYS = [
     "schema_creation_enabled",
+    "schema_creation_requests",
     "request_id",
     "environment",
     "sandbox_mode",
@@ -107,13 +108,22 @@ def build_tfvars_payload(normalized_payload: dict[str, Any]) -> dict[str, Any]:
     tfvars_payload: dict[str, Any] = {"schema_creation_enabled": True}
 
     for key in DECLARED_TFVARS_KEYS:
-        if key == "schema_creation_enabled":
+        if key in {"schema_creation_enabled", "schema_creation_requests"}:
             continue
         value = normalized_payload.get(key)
         if key in {"create_communitymart_schema", "governance_approval_required", "ad_approval_required"}:
             tfvars_payload[key] = _to_bool(value)
         else:
             tfvars_payload[key] = _normalize(value)
+
+    request_id = tfvars_payload["request_id"]
+    tfvars_payload["schema_creation_requests"] = {
+        request_id: {
+            key: value
+            for key, value in tfvars_payload.items()
+            if key not in {"schema_creation_enabled", "schema_creation_requests"}
+        }
+    }
 
     return tfvars_payload
 

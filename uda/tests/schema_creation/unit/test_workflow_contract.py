@@ -49,8 +49,20 @@ def test_schema_workflow_uses_repo_root_paths_for_plan_files() -> None:
 
     assert '-var-file="$GITHUB_WORKSPACE/$TFVARS_JSON"' in run_text
     assert '-out="$GITHUB_WORKSPACE/$TFPLAN_BIN"' in run_text
+    assert '-target="$TF_SCHEMA_TARGET"' in run_text
     assert "../../$TFVARS_JSON" not in run_text
     assert "../../$TFPLAN_BIN" not in run_text
+
+
+def test_schema_workflow_migrates_legacy_module_address() -> None:
+    workflow = _workflow()
+    plan_job = workflow["jobs"]["plan-schema-creation"]
+    migration_step = next(
+        step for step in plan_job["steps"] if step.get("name") == "Migrate legacy schema state address"
+    )
+
+    assert "state mv" in migration_step["run"]
+    assert "module.schema_creation[0]" in migration_step["run"]
 
 
 def test_schema_workflow_uses_repo_root_path_for_apply_file() -> None:
