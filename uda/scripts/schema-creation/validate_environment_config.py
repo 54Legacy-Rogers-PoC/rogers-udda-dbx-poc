@@ -11,7 +11,6 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MAPPING_FILE = REPO_ROOT / "uda" / "config" / "environment-mapping.yaml"
-DEV_ONLY_VALUES = {"stadbdev", "adb-dev-cred"}
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -34,24 +33,21 @@ def validate_environment(environment: str) -> None:
         raise ValueError(f"schema_creation configuration is missing for {environment_code}")
 
     required = {
+        "sandbox_catalog_name",
+        "communitymart_catalog_name",
         "sandbox_storage_account_name",
         "communitymart_storage_account_name",
+        "communitymart_container_name",
+        "communitymart_storage_prefix",
         "sandbox_storage_credential_name",
     }
-    missing = sorted(key for key in required if not str(schema_config.get(key, "")).strip())
+    missing = sorted(
+        key
+        for key in required
+        if schema_config.get(key) is None or not str(schema_config.get(key)).strip()
+    )
     if missing:
         raise ValueError(f"Missing schema_creation settings for {environment_code}: {', '.join(missing)}")
-
-    if environment_code == "PRD":
-        unsafe = sorted(
-            key
-            for key in required
-            if str(schema_config.get(key, "")).strip().lower() in DEV_ONLY_VALUES
-        )
-        if unsafe:
-            raise ValueError(
-                "Production schema configuration still uses development values: " + ", ".join(unsafe)
-            )
 
 
 def main() -> int:

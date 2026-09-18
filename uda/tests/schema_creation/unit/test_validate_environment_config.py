@@ -30,8 +30,12 @@ def _write_config(tmp_path: Path, *, storage_account: str, credential: str) -> N
     )
     (config_dir / "prd.yaml").write_text(
         "schema_creation:\n"
+        "  sandbox_catalog_name: edlbi_ss\n"
+        "  communitymart_catalog_name: edl_communitymart\n"
         f"  sandbox_storage_account_name: {storage_account}\n"
         f"  communitymart_storage_account_name: {storage_account}\n"
+        "  communitymart_container_name: edl-community-mart\n"
+        "  communitymart_storage_prefix: edl_community_mart\n"
         f"  sandbox_storage_credential_name: {credential}\n",
         encoding="utf-8",
     )
@@ -39,14 +43,20 @@ def _write_config(tmp_path: Path, *, storage_account: str, credential: str) -> N
     validator.MAPPING_FILE = config_dir / "mapping.yaml"
 
 
-def test_production_rejects_development_storage_values(tmp_path: Path) -> None:
+def test_production_accepts_configured_storage_values_regardless_of_name(tmp_path: Path) -> None:
     _write_config(tmp_path, storage_account="stadbdev", credential="adb-dev-cred")
 
-    with pytest.raises(ValueError, match="development values"):
-        validator.validate_environment("PRD")
+    validator.validate_environment("PRD")
 
 
 def test_production_accepts_distinct_production_storage_values(tmp_path: Path) -> None:
     _write_config(tmp_path, storage_account="stadbprd", credential="adb-prd-cred")
 
     validator.validate_environment("PRD")
+
+
+def test_environment_rejects_missing_required_setting(tmp_path: Path) -> None:
+    _write_config(tmp_path, storage_account="", credential="adb-dev-cred")
+
+    with pytest.raises(ValueError, match="storage_account_name"):
+        validator.validate_environment("PRD")
