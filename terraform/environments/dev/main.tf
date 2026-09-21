@@ -117,7 +117,6 @@ module "service_account_cluster" {
 # AD group cluster ADD access is isolated so it mirrors the dedicated ADD
 # workflow and keeps Terraform addresses activity-specific.
 module "cluster_ad_group_add" {
-  count  = 0
   source = "../../modules/cluster-adgroup-add"
 
   add_records = local.cluster_ad_group_add_records
