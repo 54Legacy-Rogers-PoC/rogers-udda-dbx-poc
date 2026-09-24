@@ -48,15 +48,12 @@ def test_pull_requests_run_plan_but_never_apply_or_mutate_state() -> None:
     steps = {step.get("name"): step for step in plan_job["steps"]}
     assert "Terraform plan" in steps
     assert "if" not in steps["Terraform plan"]
-    for name in (
-        "Back up Terraform state before migration",
-        "Terraform apply",
-    ):
-        condition = steps[name]["if"]
-        assert "github.event_name == 'push'" in condition
-        assert "inputs.run_apply" in condition
+    condition = steps["Terraform apply"]["if"]
+    assert "github.event_name == 'push'" in condition
+    assert "inputs.run_apply" in condition
 
     assert "Ensure sandbox ADLS container exists" not in steps
+    assert "Back up Terraform state before migration" not in steps
 
 
 def test_workflow_has_no_removal_override_and_rejects_delete_actions() -> None:
@@ -78,18 +75,31 @@ def test_workflow_has_no_removal_override_and_rejects_delete_actions() -> None:
 def test_deployment_is_main_only_and_uses_protected_environment() -> None:
     workflow = _workflow()
     assert workflow[True]["push"]["branches"] == ["main"]
+    expected_paths = {
+        "requests/schema-creation/dev/**",
+        "requests/schema-creation/qa/**",
+        "requests/schema-creation/prd/**",
+    }
+    assert set(workflow[True]["push"]["paths"]) == expected_paths
+    assert set(workflow[True]["pull_request"]["paths"]) == expected_paths
     environment = workflow["jobs"]["plan-schema-creation"]["environment"]
-    assert "schema-creation-plan" in environment
-    assert "schema-creation-production" in environment
+    assert "schema-creation-{0}-plan" in environment
+    assert "matrix.deployment_environment" in environment
+    post_environment = workflow["jobs"]["post-validate-schema-creation"]["environment"]
+    assert "schema-creation-{0}" in post_environment
+    assert "matrix.deployment_environment" in post_environment
 
 
 def test_local_validation_runs_before_cloud_setup() -> None:
     steps = _workflow()["jobs"]["plan-schema-creation"]["steps"]
     names = [step.get("name") for step in steps]
     assert names.index("Validate deployment environment") < names.index("Setup Azure and Databricks")
+    validation_step = next(step for step in steps if step.get("name") == "Validate deployment environment")
+    assert '--expected-environment "$EXPECTED_ENVIRONMENT_CODE"' in validation_step["run"]
+    assert '--github-output "$GITHUB_OUTPUT"' in validation_step["run"]
 
 
-def test_schema_jobs_use_the_same_new_shared_backend_state() -> None:
+def test_schema_jobs_use_environment_scoped_shared_backend_state() -> None:
     workflow = _workflow()
     plan_steps = workflow["jobs"]["plan-schema-creation"]["steps"]
     post_steps = workflow["jobs"]["post-validate-schema-creation"]["steps"]
@@ -97,10 +107,29 @@ def test_schema_jobs_use_the_same_new_shared_backend_state() -> None:
     plan_setup = next(step for step in plan_steps if step.get("name") == "Setup Azure and Databricks")
     post_setup = next(step for step in post_steps if step.get("name") == "Setup Azure and Databricks")
 
-    assert plan_setup["with"]["tfstate_key_suffix"] == "schema-creation-v2"
-    assert post_setup["with"]["tfstate_key_suffix"] == "schema-creation-v2"
+    assert plan_setup["with"]["tfstate_key_suffix"] == "${{ matrix.tfstate_key_suffix }}"
+    assert post_setup["with"]["tfstate_key_suffix"] == "${{ matrix.tfstate_key_suffix }}"
+    assert plan_setup["with"]["keyvault_name"] == "${{ steps.environment_config.outputs.keyvault_name }}"
+    assert post_setup["with"]["keyvault_name"] == "${{ steps.environment_config.outputs.keyvault_name }}"
+    assert "${{ secrets.KEYVAULT_NAME }}" not in str(workflow)
+    configured_secret_inputs = {
+        "databricks_host_secret_name",
+        "databricks_client_id_secret_name",
+        "databricks_client_secret_secret_name",
+        "databricks_tenant_id_secret_name",
+        "databricks_workspace_resource_id_secret_name",
+        "tfstate_resource_group_secret_name",
+        "tfstate_storage_account_secret_name",
+        "tfstate_container_secret_name",
+        "tfstate_key_secret_name",
+    }
+    assert configured_secret_inputs <= plan_setup["with"].keys()
+    assert configured_secret_inputs <= post_setup["with"].keys()
     assert "tfstate_key_override" not in plan_setup["with"]
     assert "tfstate_key_override" not in post_setup["with"]
+    plan_env = workflow["jobs"]["plan-schema-creation"]["env"]
+    assert plan_env["REQUESTS_DIRECTORY"] == "requests/schema-creation/${{ matrix.deployment_environment }}"
+    assert plan_env["EXPECTED_ENVIRONMENT_CODE"] == "${{ matrix.environment_code }}"
 
 
 def test_shared_setup_masks_keyvault_databricks_secret() -> None:
@@ -137,7 +166,7 @@ def test_schema_workflow_targets_only_current_request_keys() -> None:
     targets_run = steps["Build request Terraform targets"]["run"]
 
     assert "--existing-request-ids-file" in generate_run
-    assert "--requests-directory requests/schema-creation" in generate_run
+    assert '--requests-directory "$REQUESTS_DIRECTORY"' in generate_run
     assert '--current-targets-json "$CURRENT_TARGETS_JSON"' in generate_run
     assert 'keys[] | "module.schema_creation' in targets_run
     assert '"$CURRENT_TARGETS_JSON"' in targets_run
@@ -161,14 +190,26 @@ def test_schema_workflow_discovers_added_request_files_only() -> None:
     assert "--diff-filter=AM " not in collector
     assert "--diff-filter=MD " in collector
     assert "Existing schema requests are immutable" in collector
+    assert "requests/schema-creation/qa" in collector
+    assert "requests/schema-creation/prd" in collector
+    assert '"schema-creation-v2-dev"' in collector
+    assert '"schema-creation-v2-qa"' in collector
+    assert '"schema-creation-v2"' in collector
+    assert r'\"deployment_environment\"' in collector
+    assert r'\"environment_code\"' in collector
+    assert r'\"tfstate_key_suffix\"' in collector
 
 
-def test_schema_workflow_does_not_publish_state_backup() -> None:
-    steps = _workflow()["jobs"]["plan-schema-creation"]["steps"]
-    publish_step = next(step for step in steps if step.get("name") == "Publish plan outputs")
+def test_schema_workflow_has_no_obsolete_state_backup_or_artifact_download() -> None:
+    workflow = _workflow()
+    plan_steps = workflow["jobs"]["plan-schema-creation"]["steps"]
+    plan_names = [step.get("name") for step in plan_steps]
+    post_names = [step.get("name") for step in workflow["jobs"]["post-validate-schema-creation"]["steps"]]
 
-    assert "pre-migration-state.json" in publish_step["with"]["path"]
-    assert "!${{ steps.prep_paths.outputs.output_dir }}/pre-migration-state.json" in publish_step["with"]["path"]
+    assert "Back up Terraform state before migration" not in plan_names
+    assert "Download plan artifacts" not in post_names
+    publish_step = next(step for step in plan_steps if step.get("name") == "Publish plan outputs")
+    assert "!${{ steps.prep_paths.outputs.output_dir }}/schema-creation.tfplan" in publish_step["with"]["path"]
 
 
 def test_communitymart_catalog_grants_are_owned_once_at_root() -> None:

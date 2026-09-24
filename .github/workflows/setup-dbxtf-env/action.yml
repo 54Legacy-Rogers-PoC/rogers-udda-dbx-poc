@@ -17,6 +17,42 @@ inputs:
   keyvault_name:
     description: Azure Key Vault name
     required: true
+  databricks_host_secret_name:
+    description: Key Vault secret containing the Databricks host
+    required: false
+    default: DATABRICKS-HOST
+  databricks_client_id_secret_name:
+    description: Key Vault secret containing the Databricks client ID
+    required: false
+    default: DATABRICKS-CLIENT-ID
+  databricks_client_secret_secret_name:
+    description: Key Vault secret containing the Databricks client secret
+    required: false
+    default: DATABRICKS-CLIENT-SECRET
+  databricks_tenant_id_secret_name:
+    description: Key Vault secret containing the Databricks tenant ID
+    required: false
+    default: DATABRICKS-TENANT-ID
+  databricks_workspace_resource_id_secret_name:
+    description: Key Vault secret containing the Databricks workspace resource ID
+    required: false
+    default: DATABRICKS-WORKSPACE-RESOURCE-ID
+  tfstate_resource_group_secret_name:
+    description: Key Vault secret containing the Terraform state resource group
+    required: false
+    default: TFSTATE-RESOURCE-GROUP
+  tfstate_storage_account_secret_name:
+    description: Key Vault secret containing the Terraform state storage account
+    required: false
+    default: TFSTATE-STORAGE-ACCOUNT
+  tfstate_container_secret_name:
+    description: Key Vault secret containing the Terraform state container
+    required: false
+    default: TFSTATE-CONTAINER-DBX-UDA
+  tfstate_key_secret_name:
+    description: Key Vault secret containing the Terraform state key
+    required: false
+    default: TFSTATE-KEY-DBX
   tfstate_key_suffix:
     description: Optional suffix appended to TFSTATE key to isolate workflow state
     required: false
@@ -67,6 +103,15 @@ runs:
       shell: bash
       env:
         KEYVAULT_NAME: ${{ inputs.keyvault_name }}
+        DATABRICKS_HOST_SECRET_NAME: ${{ inputs.databricks_host_secret_name }}
+        DATABRICKS_CLIENT_ID_SECRET_NAME: ${{ inputs.databricks_client_id_secret_name }}
+        DATABRICKS_CLIENT_SECRET_SECRET_NAME: ${{ inputs.databricks_client_secret_secret_name }}
+        DATABRICKS_TENANT_ID_SECRET_NAME: ${{ inputs.databricks_tenant_id_secret_name }}
+        DATABRICKS_WORKSPACE_RESOURCE_ID_SECRET_NAME: ${{ inputs.databricks_workspace_resource_id_secret_name }}
+        TFSTATE_RESOURCE_GROUP_SECRET_NAME: ${{ inputs.tfstate_resource_group_secret_name }}
+        TFSTATE_STORAGE_ACCOUNT_SECRET_NAME: ${{ inputs.tfstate_storage_account_secret_name }}
+        TFSTATE_CONTAINER_SECRET_NAME: ${{ inputs.tfstate_container_secret_name }}
+        TFSTATE_KEY_SECRET_NAME: ${{ inputs.tfstate_key_secret_name }}
         AZURE_CLIENT_ID: ${{ inputs.azure_client_id }}
         AZURE_CLIENT_SECRET: ${{ inputs.azure_client_secret }}
         AZURE_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
@@ -107,7 +152,7 @@ runs:
           return 1
         }
 
-        DBX_HOST=$(get_kv_secret "Databricks host" DATABRICKS-HOST DATABRICKS_HOST)
+        DBX_HOST=$(get_kv_secret "Databricks host" "$DATABRICKS_HOST_SECRET_NAME" DATABRICKS_HOST)
         DBX_HOST="${DBX_HOST%/}"
         if [[ "$DBX_HOST" =~ ^https?:// ]]; then
           DBX_HOST="${DBX_HOST#http://}"
@@ -120,10 +165,10 @@ runs:
             DBX_HOST="https://${DBX_HOST}"
           fi
         fi
-        DBX_CLIENT_ID=$(try_kv_secret DATABRICKS-CLIENT-ID DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID DB-OAUTH-CLIENT-ID DB_OAUTH_CLIENT_ID || true)
-        DBX_CLIENT_SECRET=$(try_kv_secret DATABRICKS-CLIENT-SECRET DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET DB-OAUTH-CLIENT-SECRET DB-OAUTH-SECRET DB_OAUTH_CLIENT_SECRET DB_OAUTH_SECRET || true)
-        DBX_TENANT_ID=$(try_kv_secret DATABRICKS-TENANT-ID DATABRICKS-TENANTID DATABRICKS_TENANT_ID DB-OAUTH-TENANT-ID DB_OAUTH_TENANT_ID || true)
-        DBX_WORKSPACE_RESOURCE_ID=$(try_kv_secret DATABRICKS-WORKSPACE-RESOURCE-ID DATABRICKS_WORKSPACE_RESOURCE_ID || true)
+        DBX_CLIENT_ID=$(try_kv_secret "$DATABRICKS_CLIENT_ID_SECRET_NAME" DATABRICKS-CLIENTID DATABRICKS_CLIENT_ID DB-OAUTH-CLIENT-ID DB_OAUTH_CLIENT_ID || true)
+        DBX_CLIENT_SECRET=$(try_kv_secret "$DATABRICKS_CLIENT_SECRET_SECRET_NAME" DATABRICKS-CLIENTSECRET DATABRICKS_CLIENT_SECRET DB-OAUTH-CLIENT-SECRET DB-OAUTH-SECRET DB_OAUTH_CLIENT_SECRET DB_OAUTH_SECRET || true)
+        DBX_TENANT_ID=$(try_kv_secret "$DATABRICKS_TENANT_ID_SECRET_NAME" DATABRICKS-TENANTID DATABRICKS_TENANT_ID DB-OAUTH-TENANT-ID DB_OAUTH_TENANT_ID || true)
+        DBX_WORKSPACE_RESOURCE_ID=$(try_kv_secret "$DATABRICKS_WORKSPACE_RESOURCE_ID_SECRET_NAME" DATABRICKS_WORKSPACE_RESOURCE_ID || true)
 
         DBX_CLIENT_ID="${DBX_CLIENT_ID:-$AZURE_CLIENT_ID}"
         DBX_CLIENT_SECRET="${DBX_CLIENT_SECRET:-$AZURE_CLIENT_SECRET}"
@@ -149,10 +194,10 @@ runs:
         echo "DATABRICKS_WORKSPACE_RESOURCE_ID=$DBX_WORKSPACE_RESOURCE_ID" >> "$GITHUB_ENV"
         echo "TF_VAR_databricks_workspace_resource_id=$DBX_WORKSPACE_RESOURCE_ID" >> "$GITHUB_ENV"
 
-        TFSTATE_RG=$(get_kv_secret "TF state resource group" TFSTATE-RESOURCE-GROUP TFSTATE_RESOURCE_GROUP)
-        TFSTATE_SA=$(get_kv_secret "TF state storage account" TFSTATE-STORAGE-ACCOUNT TFSTATE_STORAGE_ACCOUNT)
-        TFSTATE_CONTAINER=$(get_kv_secret "TF state container" TFSTATE-CONTAINER-DBX-UDA)
-        TFSTATE_KEY_BASE=$(get_kv_secret "TF state key" TFSTATE-KEY-DBX)
+        TFSTATE_RG=$(get_kv_secret "TF state resource group" "$TFSTATE_RESOURCE_GROUP_SECRET_NAME" TFSTATE_RESOURCE_GROUP)
+        TFSTATE_SA=$(get_kv_secret "TF state storage account" "$TFSTATE_STORAGE_ACCOUNT_SECRET_NAME" TFSTATE_STORAGE_ACCOUNT)
+        TFSTATE_CONTAINER=$(get_kv_secret "TF state container" "$TFSTATE_CONTAINER_SECRET_NAME")
+        TFSTATE_KEY_BASE=$(get_kv_secret "TF state key" "$TFSTATE_KEY_SECRET_NAME")
 
         TFSTATE_KEY_OVERRIDE="${{ inputs.tfstate_key_override }}"
         TFSTATE_KEY_SUFFIX="${{ inputs.tfstate_key_suffix }}"

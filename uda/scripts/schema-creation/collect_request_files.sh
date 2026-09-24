@@ -13,7 +13,9 @@ add_request() {
   local p
   p="$(normalize_path "$1")"
   [ -z "$p" ] && return 0
-  [[ "$p" == requests/schema-creation/dev/*.yml || "$p" == requests/schema-creation/dev/*.yaml || "$p" == uda/templates/schema-creation/*.yml || "$p" == uda/templates/schema-creation/*.yaml ]] || return 0
+  [[ "$p" == requests/schema-creation/dev/*.yml || "$p" == requests/schema-creation/dev/*.yaml ||
+     "$p" == requests/schema-creation/qa/*.yml || "$p" == requests/schema-creation/qa/*.yaml ||
+     "$p" == requests/schema-creation/prd/*.yml || "$p" == requests/schema-creation/prd/*.yaml ]] || return 0
 
   if [ -f "$p" ]; then
     REQUESTS+=("$p")
@@ -49,7 +51,7 @@ if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
 else
   # Push/PR runs process newly added requests only.
   if [ -n "${BASE_SHA_EVENT:-}" ] && [ -n "${HEAD_SHA_EVENT:-}" ]; then
-    immutable_changes="$(git diff --name-only --diff-filter=MD "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" -- requests/schema-creation/dev || true)"
+    immutable_changes="$(git diff --name-only --diff-filter=MD "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" -- requests/schema-creation/dev requests/schema-creation/qa requests/schema-creation/prd || true)"
     if [ -n "$immutable_changes" ]; then
       echo "Existing schema requests are immutable. Add a new request file instead of modifying or deleting:" >&2
       printf '%s\n' "$immutable_changes" >&2
@@ -58,7 +60,7 @@ else
 
     while IFS= read -r changed; do
       add_request "$changed"
-    done < <(git diff --name-only --diff-filter=A "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" || true)
+    done < <(git diff --name-only --diff-filter=A "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" -- requests/schema-creation/dev requests/schema-creation/qa requests/schema-creation/prd || true)
   fi
 fi
 
@@ -85,6 +87,15 @@ for rf in "${DEDUPED[@]}"; do
   fi
 done
 
+request_environment() {
+  case "$1" in
+    requests/schema-creation/dev/*) printf '%s|%s|%s' "dev" "DEV" "schema-creation-v2-dev" ;;
+    requests/schema-creation/qa/*) printf '%s|%s|%s' "qa" "QA" "schema-creation-v2-qa" ;;
+    requests/schema-creation/prd/*) printf '%s|%s|%s' "prd" "PRD" "schema-creation-v2" ;;
+    *) echo "Unsupported schema request path: $1" >&2; return 1 ;;
+  esac
+}
+
 # Emit a compact matrix payload so the workflow stays declarative.
 matrix_json="{\"include\":["
 first=true
@@ -95,7 +106,8 @@ for rf in "${DEDUPED[@]}"; do
     matrix_json+="," 
   fi
   escaped="${rf//\"/\\\"}"
-  matrix_json+="{\"request_file\":\"$escaped\"}"
+  IFS='|' read -r deployment_environment environment_code tfstate_key_suffix < <(request_environment "$rf")
+  matrix_json+="{\"request_file\":\"$escaped\",\"deployment_environment\":\"$deployment_environment\",\"environment_code\":\"$environment_code\",\"tfstate_key_suffix\":\"$tfstate_key_suffix\"}"
 done
 matrix_json+="]}"
 
