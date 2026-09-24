@@ -161,9 +161,12 @@ jobs:
         run: |
           set -euo pipefail
           existing_ids_file="$OUTPUT_DIR/existing-schema-request-ids.txt"
+          terraform_state_json="$(mktemp "$RUNNER_TEMP/schema-state.XXXXXX.json")"
+          trap 'rm -f "$terraform_state_json"' EXIT
           terraform -chdir="$TF_WORKDIR" state list | python -c \
             'import re,sys; ids={match.group(1) for line in sys.stdin for match in [re.match(r"^module\.schema_creation\[\"([^\"]+)\"\]\.", line)] if match}; print("\n".join(sorted(ids)))' \
             > "$existing_ids_file"
+          terraform -chdir="$TF_WORKDIR" show -json > "$terraform_state_json"
 
           python uda/scripts/schema-creation/generate_tfvars.py \
             --input-json "$NORMALIZED_JSON" \
@@ -171,6 +174,7 @@ jobs:
             --current-targets-json "$CURRENT_TARGETS_JSON" \
             --existing-request-ids-file "$existing_ids_file" \
             --requests-directory "$REQUESTS_DIRECTORY" \
+            --terraform-state-json "$terraform_state_json" \
             --terraform-variables-file terraform/environments/dev/variables.tf
 
       - name: Build request Terraform targets

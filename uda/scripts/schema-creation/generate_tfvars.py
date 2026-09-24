@@ -217,15 +217,103 @@ def _load_request_index(requests_directory: Path) -> dict[str, list[dict[str, An
     return request_index
 
 
+def _state_resources(module: dict[str, Any]) -> list[dict[str, Any]]:
+    resources = list(module.get("resources", []))
+    for child in module.get("child_modules", []):
+        resources.extend(_state_resources(child))
+    return resources
+
+
+def _load_state_target_index(state_json: Path | None) -> dict[str, dict[str, Any]]:
+    if state_json is None:
+        return {}
+
+    state = _load_json_document(state_json)
+    root_module = state.get("values", {}).get("root_module", {})
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    address_pattern = re.compile(r'^module\.schema_creation\["(.+)"\]\.([^[]+)(?:\[\d+\])?$')
+    for resource in _state_resources(root_module):
+        match = address_pattern.match(str(resource.get("address", "")))
+        if match:
+            grouped.setdefault(match.group(1), []).append(resource)
+
+    targets: dict[str, dict[str, Any]] = {}
+    for state_key, resources in grouped.items():
+        key_parts = state_key.split("|", 2)
+        if len(key_parts) != 3:
+            continue
+        environment, catalog, schema_name = key_parts
+        schema_resource = next(
+            (resource for resource in resources if resource.get("type") == "databricks_schema"),
+            None,
+        )
+        if schema_resource is None:
+            continue
+        schema_values = schema_resource.get("values", {})
+        comment = _normalize(schema_values.get("comment"))
+        request_match = re.search(r"(?:request|Request)\s+(\S+)$", comment)
+        request_id = request_match.group(1) if request_match else f"STATE-{schema_name}"
+        target_type = "communitymart" if schema_resource.get("name") == "communitymart" else "sandbox"
+        owner_resource_name = f"{target_type}_owner"
+        ad_group_resource_name = f"{target_type}_ad_group" if target_type == "sandbox" else "communitymart_ad_group_schema"
+        owner = next(
+            (
+                _normalize(resource.get("values", {}).get("principal"))
+                for resource in resources
+                if resource.get("name") == owner_resource_name
+            ),
+            "",
+        )
+        ad_group = next(
+            (
+                _normalize(resource.get("values", {}).get("principal"))
+                for resource in resources
+                if resource.get("name") == ad_group_resource_name
+            ),
+            owner,
+        )
+        targets[state_key] = {
+            "target_type": target_type,
+            "target_catalog": _normalize(schema_values.get("catalog_name") or catalog).lower(),
+            "target_schema_name": _normalize(schema_values.get("name") or schema_name).lower(),
+            "request_id": request_id,
+            "environment": environment.upper(),
+            "sandbox_mode": "new" if target_type == "sandbox" else "existing",
+            "sandbox_schema_name": schema_name if target_type == "sandbox" else "",
+            "sandbox_owner_name": owner if target_type == "sandbox" else "",
+            "create_communitymart_schema": target_type == "communitymart",
+            "communitymart_schema_name": schema_name if target_type == "communitymart" else "",
+            "communitymart_owner_name": owner if target_type == "communitymart" else "",
+            "ad_group_name": ad_group,
+            "justification": "Reconstructed from Terraform state",
+            "additional_information": "",
+            "assignment_group": "STATE_RECONSTRUCTED",
+            "epdg_ticket_url": "",
+            "governance_approval_required": False,
+            "ad_approval_required": False,
+        }
+    return targets
+
+
+def _load_json_document(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected a JSON object in {path}")
+    return payload
+
+
 def build_shared_tfvars_payload(
     current_payload: dict[str, Any],
     *,
     existing_request_ids: set[str],
     requests_directory: Path,
+    state_targets: dict[str, dict[str, Any]] | None = None,
     orphaned_state_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     current_values = _build_request_values(current_payload)
     current_request_id = current_values["request_id"]
+    state_targets = state_targets or {}
     request_index = _load_request_index(requests_directory) if existing_request_ids else {}
     target_index: dict[str, list[dict[str, Any]]] = {}
     for requests in request_index.values():
@@ -252,6 +340,8 @@ def build_shared_tfvars_payload(
                 owners = ", ".join(sorted(str(target["request_id"]) for target in matches))
                 raise ValueError(f"State-backed schema target {state_key} has multiple request sources: {owners}")
             existing_targets = {state_key: matches[0]}
+        elif state_key in state_targets:
+            existing_targets = {state_key: state_targets[state_key]}
         else:
             if orphaned_state_keys is not None:
                 orphaned_state_keys.append(state_key)
@@ -320,6 +410,10 @@ def parse_args() -> argparse.Namespace:
         help="Request source directory used to reconstruct state-backed request inputs",
     )
     parser.add_argument(
+        "--terraform-state-json",
+        help="Optional terraform show -json output used when a state-backed request source is absent",
+    )
+    parser.add_argument(
         "--orphaned-state-keys-file",
         help="Optional output file listing state keys whose request source was deleted",
     )
@@ -353,6 +447,9 @@ def main() -> int:
                 normalized_payload,
                 existing_request_ids=existing_request_ids,
                 requests_directory=Path(args.requests_directory).resolve(),
+                state_targets=_load_state_target_index(
+                    Path(args.terraform_state_json).resolve() if args.terraform_state_json else None
+                ),
                 orphaned_state_keys=orphaned_state_keys,
             )
         else:

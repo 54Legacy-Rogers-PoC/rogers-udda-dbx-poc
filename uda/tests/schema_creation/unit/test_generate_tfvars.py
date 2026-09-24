@@ -126,6 +126,63 @@ def test_build_shared_payload_rejects_missing_state_source_by_default(tmp_path: 
         )
 
 
+def test_build_shared_payload_reconstructs_missing_source_from_state(tmp_path: Path) -> None:
+    state_key = "PRD|edl_communitymart|vw_existing"
+    state_json = tmp_path / "state.json"
+    state_json.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "root_module": {
+                        "child_modules": [
+                            {
+                                "address": f'module.schema_creation["{state_key}"]',
+                                "resources": [
+                                    {
+                                        "address": f'module.schema_creation["{state_key}"].databricks_schema.communitymart[0]',
+                                        "type": "databricks_schema",
+                                        "name": "communitymart",
+                                        "values": {
+                                            "catalog_name": "edl_communitymart",
+                                            "name": "vw_existing",
+                                            "comment": "Community mart schema created from request RITM-OLD",
+                                        },
+                                    },
+                                    {
+                                        "address": f'module.schema_creation["{state_key}"].databricks_grant.communitymart_owner[0]',
+                                        "type": "databricks_grant",
+                                        "name": "communitymart_owner",
+                                        "values": {"principal": "owner@example.com"},
+                                    },
+                                    {
+                                        "address": f'module.schema_creation["{state_key}"].databricks_grant.communitymart_ad_group_schema[0]',
+                                        "type": "databricks_grant",
+                                        "name": "communitymart_ad_group_schema",
+                                        "values": {"principal": "group@example.com"},
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = generator.build_shared_tfvars_payload(
+        _normalized("RITM-NEW", "slfsrv_new"),
+        existing_request_ids={state_key},
+        requests_directory=tmp_path / "missing",
+        state_targets=generator._load_state_target_index(state_json),
+    )
+
+    existing = payload["schema_creation_requests"][state_key]
+    assert existing["request_id"] == "RITM-OLD"
+    assert existing["communitymart_owner_name"] == "owner@example.com"
+    assert existing["ad_group_name"] == "group@example.com"
+
+
 def test_cli_rejects_missing_state_source_without_orphan_output(tmp_path: Path) -> None:
     current = _normalized("RITM-NEW", "slfsrv_new_schema")
     input_json = tmp_path / "input.json"

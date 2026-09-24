@@ -167,6 +167,8 @@ def test_schema_workflow_targets_only_current_request_keys() -> None:
 
     assert "--existing-request-ids-file" in generate_run
     assert '--requests-directory "$REQUESTS_DIRECTORY"' in generate_run
+    assert '--terraform-state-json "$terraform_state_json"' in generate_run
+    assert 'mktemp "$RUNNER_TEMP/schema-state.' in generate_run
     assert '--current-targets-json "$CURRENT_TARGETS_JSON"' in generate_run
     assert 'keys[] | "module.schema_creation' in targets_run
     assert '"$CURRENT_TARGETS_JSON"' in targets_run
