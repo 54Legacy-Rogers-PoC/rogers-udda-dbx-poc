@@ -36,11 +36,6 @@ def test_build_targets_uses_environment_catalogs() -> None:
     config = {
         "sandbox_catalog_name": "edlbi_ss",
         "communitymart_catalog_name": "edl_communitymart",
-        "sandbox_storage_account_name": "stadbdev",
-        "communitymart_storage_account_name": "stadbdev",
-        "communitymart_container_name": "edl-community-mart",
-        "communitymart_storage_prefix": "edl_community_mart",
-        "sandbox_storage_credential_name": "adb-dev-cred",
     }
 
     targets = validator._build_targets(payload, config)
@@ -96,11 +91,6 @@ def test_validate_checks_both_schema_targets(monkeypatch: pytest.MonkeyPatch) ->
     config = {
         "sandbox_catalog_name": "sandbox_catalog",
         "communitymart_catalog_name": "mart_catalog",
-        "sandbox_storage_account_name": "storage",
-        "communitymart_storage_account_name": "storage",
-        "communitymart_container_name": "mart",
-        "communitymart_storage_prefix": "schemas",
-        "sandbox_storage_credential_name": "credential",
     }
     checked: list[str] = []
 
@@ -128,8 +118,6 @@ def test_validate_writes_failed_report(monkeypatch: pytest.MonkeyPatch, tmp_path
     }
     config = {
         "sandbox_catalog_name": "sandbox_catalog",
-        "sandbox_storage_account_name": "storage",
-        "sandbox_storage_credential_name": "credential",
     }
     report = tmp_path / "validation.json"
 

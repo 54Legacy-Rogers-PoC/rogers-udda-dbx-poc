@@ -122,7 +122,6 @@ def _validate_contract_with_terraform(tfvars_payload: dict[str, Any], variables_
         "databricks_client_secret",
         "databricks_tenant_id",
         "databricks_workspace_resource_id",
-        "default_external_location_rw_principals",
         "object_access_records",
         "record_count",
         "service_account_cluster_access_records",

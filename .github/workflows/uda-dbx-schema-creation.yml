@@ -245,15 +245,6 @@ jobs:
             exit 1
           fi
 
-      - name: Ensure sandbox ADLS container exists
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
-        shell: bash
-        env:
-          NORMALIZED_JSON: ${{ env.NORMALIZED_JSON }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        run: |
-          bash uda/scripts/schema-creation/ensure_sandbox_container.sh
-
       - name: Terraform apply
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
         run: |

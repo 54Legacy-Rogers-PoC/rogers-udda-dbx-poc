@@ -52,12 +52,13 @@ def test_pull_requests_run_plan_but_never_apply_or_mutate_state() -> None:
         "Back up Terraform state before migration",
         "Migrate legacy schema state address",
         "Migrate shared community mart catalog grants",
-        "Ensure sandbox ADLS container exists",
         "Terraform apply",
     ):
         condition = steps[name]["if"]
         assert "github.event_name == 'push'" in condition
         assert "inputs.run_apply" in condition
+
+    assert "Ensure sandbox ADLS container exists" not in steps
 
 
 def test_workflow_has_no_removal_override_and_rejects_delete_actions() -> None:
@@ -174,6 +175,19 @@ def test_communitymart_catalog_grants_are_owned_once_at_root() -> None:
     assert 'resource "databricks_grant" "communitymart_ad_group_catalog"' in root_main
     assert '"${jsondecode(encoded).catalog}|${jsondecode(encoded).principal}"' in root_main
     assert 'resource "databricks_grant" "communitymart_ad_group_catalog"' not in module_main
+
+
+def test_schema_module_uses_managed_storage_and_retires_external_locations() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    module_main = (repo_root / "terraform" / "modules" / "schema_creation" / "main.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert "storage_root" not in module_main
+    assert 'resource "databricks_external_location"' not in module_main
+    assert 'resource "databricks_grants" "sandbox_external_location_access"' not in module_main
+    assert "from = databricks_external_location.sandbox" in module_main
+    assert "destroy = false" in module_main
 
 
 def test_root_outputs_do_not_expand_all_schema_instances() -> None:

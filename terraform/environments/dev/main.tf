@@ -168,21 +168,20 @@ module "schema_creation" {
 
   source = "../../modules/schema_creation"
 
-  target_type                             = each.value.target_type
-  request_id                              = each.value.request_id
-  environment                             = each.value.environment
-  sandbox_mode                            = each.value.sandbox_mode
-  sandbox_schema_name                     = each.value.sandbox_schema_name
-  sandbox_owner_name                      = each.value.sandbox_owner_name
-  default_external_location_rw_principals = each.value.default_external_location_rw_principals
-  create_communitymart_schema             = each.value.create_communitymart_schema
-  communitymart_schema_name               = each.value.communitymart_schema_name
-  communitymart_owner_name                = each.value.communitymart_owner_name
-  ad_group_name                           = each.value.ad_group_name
-  justification                           = each.value.justification
-  additional_information                  = each.value.additional_information
-  assignment_group                        = each.value.assignment_group
-  epdg_ticket_url                         = each.value.epdg_ticket_url
-  governance_approval_required            = each.value.governance_approval_required
-  ad_approval_required                    = each.value.ad_approval_required
+  target_type                  = each.value.target_type
+  request_id                   = each.value.request_id
+  environment                  = each.value.environment
+  sandbox_mode                 = each.value.sandbox_mode
+  sandbox_schema_name          = each.value.sandbox_schema_name
+  sandbox_owner_name           = each.value.sandbox_owner_name
+  create_communitymart_schema  = each.value.create_communitymart_schema
+  communitymart_schema_name    = each.value.communitymart_schema_name
+  communitymart_owner_name     = each.value.communitymart_owner_name
+  ad_group_name                = each.value.ad_group_name
+  justification                = each.value.justification
+  additional_information       = each.value.additional_information
+  assignment_group             = each.value.assignment_group
+  epdg_ticket_url              = each.value.epdg_ticket_url
+  governance_approval_required = each.value.governance_approval_required
+  ad_approval_required         = each.value.ad_approval_required
 }

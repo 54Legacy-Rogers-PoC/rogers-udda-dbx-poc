@@ -35,11 +35,6 @@ def validate_environment(environment: str) -> None:
     required = {
         "sandbox_catalog_name",
         "communitymart_catalog_name",
-        "sandbox_storage_account_name",
-        "communitymart_storage_account_name",
-        "communitymart_container_name",
-        "communitymart_storage_prefix",
-        "sandbox_storage_credential_name",
     }
     missing = sorted(
         key

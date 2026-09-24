@@ -96,25 +96,24 @@ variable "schema_creation_enabled" {
 variable "schema_creation_requests" {
   description = "Schema creation targets keyed by environment, catalog, and schema name"
   type = map(object({
-    target_type                             = string
-    target_catalog                          = string
-    target_schema_name                      = string
-    request_id                              = string
-    environment                             = string
-    sandbox_mode                            = string
-    sandbox_schema_name                     = string
-    sandbox_owner_name                      = string
-    default_external_location_rw_principals = optional(list(string), ["furqan@54legacy.com"])
-    create_communitymart_schema             = bool
-    communitymart_schema_name               = string
-    communitymart_owner_name                = string
-    ad_group_name                           = string
-    justification                           = string
-    additional_information                  = string
-    assignment_group                        = string
-    epdg_ticket_url                         = string
-    governance_approval_required            = bool
-    ad_approval_required                    = bool
+    target_type                  = string
+    target_catalog               = string
+    target_schema_name           = string
+    request_id                   = string
+    environment                  = string
+    sandbox_mode                 = string
+    sandbox_schema_name          = string
+    sandbox_owner_name           = string
+    create_communitymart_schema  = bool
+    communitymart_schema_name    = string
+    communitymart_owner_name     = string
+    ad_group_name                = string
+    justification                = string
+    additional_information       = string
+    assignment_group             = string
+    epdg_ticket_url              = string
+    governance_approval_required = bool
+    ad_approval_required         = bool
   }))
   default = {}
 }
@@ -135,12 +134,6 @@ variable "sandbox_owner_name" {
   description = "Sandbox owner UPN/email for schema-creation requests"
   type        = string
   default     = ""
-}
-
-variable "default_external_location_rw_principals" {
-  description = "Additional principals for sandbox external location read/write access"
-  type        = list(string)
-  default     = ["furqan@54legacy.com"]
 }
 
 variable "create_communitymart_schema" {

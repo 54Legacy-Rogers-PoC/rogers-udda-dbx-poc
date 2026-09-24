@@ -8,32 +8,11 @@ locals {
   environment_config      = yamldecode(file("${path.module}/../../../${local.environment_config_path}"))
   schema_creation_config  = try(local.environment_config.schema_creation, {})
 
-  sandbox_catalog_name               = trimspace(local.schema_creation_config.sandbox_catalog_name)
-  communitymart_catalog_name         = trimspace(local.schema_creation_config.communitymart_catalog_name)
-  sandbox_storage_account_name       = trimspace(local.schema_creation_config.sandbox_storage_account_name)
-  sandbox_storage_account_host       = format("%s.dfs.core.windows.net", local.sandbox_storage_account_name)
-  communitymart_storage_account_name = trimspace(local.schema_creation_config.communitymart_storage_account_name)
-  communitymart_storage_base = format(
-    "abfss://%s@%s.dfs.core.windows.net/%s",
-    trimspace(local.schema_creation_config.communitymart_container_name),
-    local.communitymart_storage_account_name,
-    trimspace(local.schema_creation_config.communitymart_storage_prefix)
-  )
+  sandbox_catalog_name       = trimspace(local.schema_creation_config.sandbox_catalog_name)
+  communitymart_catalog_name = trimspace(local.schema_creation_config.communitymart_catalog_name)
 
-  sandbox_schema_name             = lower(trimspace(var.sandbox_schema_name))
-  sandbox_schema_parts            = split("_", local.sandbox_schema_name)
-  sandbox_container_suffix        = length(local.sandbox_schema_parts) > 2 ? join("-", slice(local.sandbox_schema_parts, 1, length(local.sandbox_schema_parts) - 1)) : replace(local.sandbox_schema_name, "_", "-")
-  sandbox_storage_container       = format("sandbox-%s", local.sandbox_container_suffix)
-  sandbox_environment_label       = lower(local.environment)
-  sandbox_external_location_name  = format("el_%s__%s__at__%s__rw", local.sandbox_environment_label, local.sandbox_storage_container, replace(local.sandbox_storage_account_host, ".dfs.core.windows.net", ""))
-  sandbox_storage_credential_name = trimspace(local.schema_creation_config.sandbox_storage_credential_name)
-  sandbox_external_location_url   = format("abfss://%s@%s/", local.sandbox_storage_container, local.sandbox_storage_account_host)
-  sandbox_storage_root            = format("abfss://%s@%s/%s", local.sandbox_storage_container, local.sandbox_storage_account_host, local.sandbox_schema_name)
-  sandbox_owner_name              = lower(trimspace(var.sandbox_owner_name))
-  default_external_location_rw_principals = toset([
-    for principal in var.default_external_location_rw_principals : lower(trimspace(principal))
-    if trimspace(principal) != ""
-  ])
+  sandbox_schema_name = lower(trimspace(var.sandbox_schema_name))
+  sandbox_owner_name  = lower(trimspace(var.sandbox_owner_name))
 
   create_communitymart_schema = var.create_communitymart_schema
   communitymart_schema_name   = lower(trimspace(var.communitymart_schema_name))
@@ -77,11 +56,6 @@ locals {
     local.environment_config_path != "",
     local.sandbox_catalog_name != "",
     local.communitymart_catalog_name != "",
-    local.sandbox_storage_account_name != "",
-    local.communitymart_storage_account_name != "",
-    trimspace(local.schema_creation_config.communitymart_container_name) != "",
-    trimspace(local.schema_creation_config.communitymart_storage_prefix) != "",
-    local.sandbox_storage_credential_name != "",
   ])
 }
 
@@ -123,13 +97,8 @@ check "schema_creation_environment_config_complete" {
 resource "databricks_schema" "sandbox" {
   count = local.manage_sandbox ? 1 : 0
 
-  depends_on = [
-    databricks_external_location.sandbox,
-  ]
-
   catalog_name = local.sandbox_catalog_name
   name         = local.sandbox_schema_name
-  storage_root = local.sandbox_storage_root
   comment      = format("Schema created from request %s", local.request_id)
 
   lifecycle {
@@ -138,41 +107,17 @@ resource "databricks_schema" "sandbox" {
   }
 }
 
-resource "databricks_external_location" "sandbox" {
-  count = local.manage_sandbox ? 1 : 0
-
-  name            = local.sandbox_external_location_name
-  url             = local.sandbox_external_location_url
-  credential_name = local.sandbox_storage_credential_name
-  read_only       = false
-  comment         = "Managed by UDA schema workflow"
-
+removed {
+  from = databricks_external_location.sandbox
   lifecycle {
-    create_before_destroy = true
-    prevent_destroy       = true
+    destroy = false
   }
 }
 
-resource "databricks_grants" "sandbox_external_location_access" {
-  count = local.manage_sandbox ? 1 : 0
-
-  external_location = databricks_external_location.sandbox[0].name
-
-  grant {
-    principal  = local.sandbox_owner_name
-    privileges = ["READ FILES", "WRITE FILES", "MANAGE"]
-  }
-
-  dynamic "grant" {
-    for_each = setsubtract(local.default_external_location_rw_principals, toset([local.sandbox_owner_name]))
-    content {
-      principal  = grant.value
-      privileges = ["READ FILES", "WRITE FILES"]
-    }
-  }
-
+removed {
+  from = databricks_grants.sandbox_external_location_access
   lifecycle {
-    create_before_destroy = true
+    destroy = false
   }
 }
 
@@ -212,7 +157,6 @@ resource "databricks_schema" "communitymart" {
 
   catalog_name = local.communitymart_catalog_name
   name         = local.communitymart_schema_name
-  storage_root = format("%s/%s", local.communitymart_storage_base, local.communitymart_schema_name)
   comment      = format("Community mart schema created from request %s", local.request_id)
 
   lifecycle {

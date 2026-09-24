@@ -21,7 +21,7 @@ def _load_module():
 validator = _load_module()
 
 
-def _write_config(tmp_path: Path, *, storage_account: str, credential: str) -> None:
+def _write_config(tmp_path: Path, *, sandbox_catalog: str = "edlbi_ss") -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "mapping.yaml").write_text(
@@ -30,33 +30,22 @@ def _write_config(tmp_path: Path, *, storage_account: str, credential: str) -> N
     )
     (config_dir / "prd.yaml").write_text(
         "schema_creation:\n"
-        "  sandbox_catalog_name: edlbi_ss\n"
-        "  communitymart_catalog_name: edl_communitymart\n"
-        f"  sandbox_storage_account_name: {storage_account}\n"
-        f"  communitymart_storage_account_name: {storage_account}\n"
-        "  communitymart_container_name: edl-community-mart\n"
-        "  communitymart_storage_prefix: edl_community_mart\n"
-        f"  sandbox_storage_credential_name: {credential}\n",
+        f"  sandbox_catalog_name: {sandbox_catalog}\n"
+        "  communitymart_catalog_name: edl_communitymart\n",
         encoding="utf-8",
     )
     validator.REPO_ROOT = tmp_path
     validator.MAPPING_FILE = config_dir / "mapping.yaml"
 
 
-def test_production_accepts_configured_storage_values_regardless_of_name(tmp_path: Path) -> None:
-    _write_config(tmp_path, storage_account="stadbdev", credential="adb-dev-cred")
-
-    validator.validate_environment("PRD")
-
-
-def test_production_accepts_distinct_production_storage_values(tmp_path: Path) -> None:
-    _write_config(tmp_path, storage_account="stadbprd", credential="adb-prd-cred")
+def test_environment_accepts_catalog_configuration(tmp_path: Path) -> None:
+    _write_config(tmp_path)
 
     validator.validate_environment("PRD")
 
 
 def test_environment_rejects_missing_required_setting(tmp_path: Path) -> None:
-    _write_config(tmp_path, storage_account="", credential="adb-dev-cred")
+    _write_config(tmp_path, sandbox_catalog="")
 
-    with pytest.raises(ValueError, match="storage_account_name"):
+    with pytest.raises(ValueError, match="sandbox_catalog_name"):
         validator.validate_environment("PRD")
