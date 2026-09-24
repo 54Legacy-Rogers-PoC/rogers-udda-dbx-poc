@@ -32,6 +32,11 @@ on:
         required: true
         default: false
         type: boolean
+      reset_shared_state:
+        description: Forget all resources in shared schema state without deleting remote resources
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -67,7 +72,7 @@ jobs:
 
   plan-schema-creation:
     needs: [detect-requests]
-    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan) }}
+    if: ${{ needs.detect-requests.outputs.has_requests == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_plan || inputs.reset_shared_state) }}
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'pull_request' && 'schema-creation-plan' || 'schema-creation-production' }}
     strategy:
@@ -138,12 +143,33 @@ jobs:
           tfstate_key_suffix: schema-creation
 
       - name: Back up Terraform state before migration
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.run_apply || inputs.reset_shared_state)) }}
         shell: bash
         run: |
           terraform -chdir="$TF_WORKDIR" state pull > "$OUTPUT_DIR/pre-migration-state.json"
 
+      - name: Empty shared schema Terraform state
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.reset_shared_state }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t state_addresses < <(terraform -chdir="$TF_WORKDIR" state list)
+          if [ "${#state_addresses[@]}" -eq 0 ]; then
+            echo "Shared schema Terraform state is already empty."
+            exit 0
+          fi
+
+          printf 'Forgetting %s state entries; remote resources will not be deleted.\n' "${#state_addresses[@]}"
+          terraform -chdir="$TF_WORKDIR" state rm "${state_addresses[@]}"
+
+          if terraform -chdir="$TF_WORKDIR" state list | grep -q .; then
+            echo "Shared schema Terraform state is not empty after reset." >&2
+            exit 1
+          fi
+          echo "Shared schema Terraform state is empty."
+
       - name: Generate request tfvars
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.reset_shared_state) }}
         shell: bash
         run: |
           set -euo pipefail
@@ -153,6 +179,7 @@ jobs:
             --terraform-variables-file terraform/environments/dev/variables.tf
 
       - name: Build request Terraform targets
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.reset_shared_state) }}
         shell: bash
         run: |
           set -euo pipefail
@@ -176,6 +203,7 @@ jobs:
           cat "$targets_file"
 
       - name: Terraform plan
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.reset_shared_state) }}
         shell: bash
         run: |
           set -euo pipefail
@@ -194,6 +222,7 @@ jobs:
           terraform -chdir="$TF_WORKDIR" show -no-color "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$TFPLAN_TXT"
 
       - name: Enforce create-or-update-only plan
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.reset_shared_state) }}
         shell: bash
         run: |
           PLAN_JSON="$OUTPUT_DIR/schema-creation-plan.json"
@@ -208,7 +237,7 @@ jobs:
           fi
 
       - name: Terraform apply
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply) }}
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.reset_shared_state) && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply)) }}
         run: |
           terraform -chdir="$TF_WORKDIR" apply -lock-timeout=10m -auto-approve "$GITHUB_WORKSPACE/$TFPLAN_BIN"
 
@@ -233,7 +262,7 @@ jobs:
 
   post-validate-schema-creation:
     needs: [detect-requests, plan-schema-creation]
-    if: ${{ needs.plan-schema-creation.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply)) }}
+    if: ${{ needs.plan-schema-creation.result == 'success' && !(github.event_name == 'workflow_dispatch' && inputs.reset_shared_state) && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_plan && inputs.run_apply)) }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

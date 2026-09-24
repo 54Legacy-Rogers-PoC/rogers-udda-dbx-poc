@@ -47,7 +47,7 @@ def test_pull_requests_run_plan_but_never_apply_or_mutate_state() -> None:
 
     steps = {step.get("name"): step for step in plan_job["steps"]}
     assert "Terraform plan" in steps
-    assert "if" not in steps["Terraform plan"]
+    assert "inputs.reset_shared_state" in steps["Terraform plan"]["if"]
     for name in (
         "Back up Terraform state before migration",
         "Terraform apply",
@@ -85,6 +85,16 @@ def test_local_validation_runs_before_cloud_setup() -> None:
     steps = _workflow()["jobs"]["plan-schema-creation"]["steps"]
     names = [step.get("name") for step in steps]
     assert names.index("Validate deployment environment") < names.index("Setup Azure and Databricks")
+
+
+def test_schema_plan_uses_shared_backend_state() -> None:
+    steps = _workflow()["jobs"]["plan-schema-creation"]["steps"]
+    step_by_name = {step.get("name"): step for step in steps}
+
+    setup_step = step_by_name["Setup Azure and Databricks"]
+    assert setup_step["with"]["tfstate_key_suffix"] == "schema-creation"
+    assert "tfstate_key_override" not in setup_step["with"]
+    assert "Compute request backend key" not in step_by_name
 
 
 def test_shared_setup_masks_keyvault_databricks_secret() -> None:
@@ -128,9 +138,35 @@ def test_schema_workflow_targets_only_current_request_keys() -> None:
     assert "Migrate legacy schema state address" not in steps
     assert "Migrate shared community mart catalog grants" not in steps
 
-    workflow_run_text = "\n".join(str(step.get("run", "")) for step in plan_job["steps"])
+    normal_steps = [
+        step for step in plan_job["steps"] if step.get("name") != "Empty shared schema Terraform state"
+    ]
+    workflow_run_text = "\n".join(str(step.get("run", "")) for step in normal_steps)
     assert "terraform -chdir=\"$TF_WORKDIR\" state mv" not in workflow_run_text
     assert "terraform -chdir=\"$TF_WORKDIR\" state rm" not in workflow_run_text
+
+
+def test_manual_reset_backs_up_and_empties_shared_state_without_destroying_resources() -> None:
+    workflow = _workflow()
+    dispatch_inputs = workflow[True]["workflow_dispatch"]["inputs"]
+    plan_job = workflow["jobs"]["plan-schema-creation"]
+    steps = plan_job["steps"]
+    step_by_name = {step.get("name"): step for step in steps}
+
+    assert dispatch_inputs["reset_shared_state"]["default"] is False
+    backup_step = step_by_name["Back up Terraform state before migration"]
+    reset_step = step_by_name["Empty shared schema Terraform state"]
+    assert steps.index(backup_step) < steps.index(reset_step)
+    assert "workflow_dispatch" in reset_step["if"]
+    assert "inputs.reset_shared_state" in reset_step["if"]
+    assert "state rm" in reset_step["run"]
+    assert "state list" in reset_step["run"]
+    assert "destroy" not in reset_step["run"]
+
+    for name in ("Generate request tfvars", "Build request Terraform targets", "Terraform plan"):
+        assert "inputs.reset_shared_state" in step_by_name[name]["if"]
+    assert "inputs.reset_shared_state" in step_by_name["Terraform apply"]["if"]
+    assert "inputs.reset_shared_state" in workflow["jobs"]["post-validate-schema-creation"]["if"]
 
 
 def test_schema_workflow_discovers_added_request_files_only() -> None:
