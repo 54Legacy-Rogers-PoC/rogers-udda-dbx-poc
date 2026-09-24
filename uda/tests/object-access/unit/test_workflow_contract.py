@@ -37,13 +37,23 @@ def test_artifact_download_uses_step_outputs() -> None:
 
 def test_plan_and_validation_jobs_use_shared_databricks_setup_action() -> None:
     workflow = _workflow()
-    action_reference = (
-        "54Legacy-Rogers-PoC/54legacy-Resusable-Workflows/"
-        "actions/setup-databricks@feature/furqan"
-    )
+    action_reference = "./.github/workflows/setup-dbxtf-env"
 
     for job_name in ("plan-object-access", "post-validate-object-access"):
         steps = workflow["jobs"][job_name]["steps"]
         setup_steps = [step for step in steps if step.get("uses") == action_reference]
         assert len(setup_steps) == 1
+        setup = setup_steps[0]
+        assert setup["with"]["keyvault_name"] == "${{ steps.environment_config.outputs.keyvault_name }}"
+        assert "${{ secrets.KEYVAULT_NAME }}" not in str(setup)
         assert not any(step.get("uses", "").startswith("azure/login@") for step in steps)
+
+
+def test_environment_is_resolved_before_cloud_setup() -> None:
+    workflow = _workflow()
+    for job_name in ("plan-object-access", "post-validate-object-access"):
+        steps = workflow["jobs"][job_name]["steps"]
+        names = [step.get("name") for step in steps]
+        assert names.index("Resolve environment configuration") < names.index("Setup Azure and Databricks")
+        resolver = next(step for step in steps if step.get("name") == "Resolve environment configuration")
+        assert "uda/scripts/resolve_environment_config.py" in resolver["run"]

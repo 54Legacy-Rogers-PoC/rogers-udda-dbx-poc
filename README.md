@@ -65,7 +65,7 @@ GitHub Actions expects repository secrets for Azure login:
 - `AZURE_SUBSCRIPTION_ID`
 - `AZURE_TENANT_ID`
 
-Most workflows also expect `KEYVAULT_NAME`. Schema creation instead resolves the Key Vault name and Key Vault secret names from `uda/config/environments/<environment>.yaml`.
+Deployment workflows resolve the Key Vault name and Key Vault secret names from `uda/config/environments/<environment>.yaml`.
 
 Key Vault must provide Databricks, Terraform backend, and completion-notification secrets consumed by the workflows.
 

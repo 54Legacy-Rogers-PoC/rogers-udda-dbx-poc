@@ -31,6 +31,16 @@ jobs:
       ad_group_name: ${{ steps.read_metadata.outputs.ad_group_name }}
       cluster_id: ${{ steps.read_metadata.outputs.cluster_id }}
       cluster_permission_level: ${{ steps.read_metadata.outputs.cluster_permission_level }}
+      keyvault_name: ${{ steps.environment_config.outputs.keyvault_name }}
+      databricks_host_secret_name: ${{ steps.environment_config.outputs.databricks_host_secret_name }}
+      databricks_client_id_secret_name: ${{ steps.environment_config.outputs.databricks_client_id_secret_name }}
+      databricks_client_secret_secret_name: ${{ steps.environment_config.outputs.databricks_client_secret_secret_name }}
+      databricks_tenant_id_secret_name: ${{ steps.environment_config.outputs.databricks_tenant_id_secret_name }}
+      databricks_workspace_resource_id_secret_name: ${{ steps.environment_config.outputs.databricks_workspace_resource_id_secret_name }}
+      tfstate_resource_group_secret_name: ${{ steps.environment_config.outputs.tfstate_resource_group_secret_name }}
+      tfstate_storage_account_secret_name: ${{ steps.environment_config.outputs.tfstate_storage_account_secret_name }}
+      tfstate_container_secret_name: ${{ steps.environment_config.outputs.tfstate_container_secret_name }}
+      tfstate_key_secret_name: ${{ steps.environment_config.outputs.tfstate_key_secret_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -66,6 +76,13 @@ jobs:
           echo "ad_group_name=$(jq -r .ad_group_name generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "cluster_id=$(jq -r .cluster_id generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
           echo "cluster_permission_level=$(jq -r .cluster_permission_level generated/request_metadata.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve environment configuration
+        id: environment_config
+        run: |
+          python uda/scripts/resolve_environment_config.py \
+            --request-json generated/request_metadata.json \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Enforce REMOVE activity for this workflow
         run: |
@@ -108,7 +125,16 @@ jobs:
           azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
-          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          keyvault_name: ${{ needs.validate_request.outputs.keyvault_name }}
+          databricks_host_secret_name: ${{ needs.validate_request.outputs.databricks_host_secret_name }}
+          databricks_client_id_secret_name: ${{ needs.validate_request.outputs.databricks_client_id_secret_name }}
+          databricks_client_secret_secret_name: ${{ needs.validate_request.outputs.databricks_client_secret_secret_name }}
+          databricks_tenant_id_secret_name: ${{ needs.validate_request.outputs.databricks_tenant_id_secret_name }}
+          databricks_workspace_resource_id_secret_name: ${{ needs.validate_request.outputs.databricks_workspace_resource_id_secret_name }}
+          tfstate_resource_group_secret_name: ${{ needs.validate_request.outputs.tfstate_resource_group_secret_name }}
+          tfstate_storage_account_secret_name: ${{ needs.validate_request.outputs.tfstate_storage_account_secret_name }}
+          tfstate_container_secret_name: ${{ needs.validate_request.outputs.tfstate_container_secret_name }}
+          tfstate_key_secret_name: ${{ needs.validate_request.outputs.tfstate_key_secret_name }}
           tfstate_key_suffix: cluster-adgroup
 
       - name: Terraform validate
@@ -165,7 +191,16 @@ jobs:
           azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
-          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          keyvault_name: ${{ needs.validate_request.outputs.keyvault_name }}
+          databricks_host_secret_name: ${{ needs.validate_request.outputs.databricks_host_secret_name }}
+          databricks_client_id_secret_name: ${{ needs.validate_request.outputs.databricks_client_id_secret_name }}
+          databricks_client_secret_secret_name: ${{ needs.validate_request.outputs.databricks_client_secret_secret_name }}
+          databricks_tenant_id_secret_name: ${{ needs.validate_request.outputs.databricks_tenant_id_secret_name }}
+          databricks_workspace_resource_id_secret_name: ${{ needs.validate_request.outputs.databricks_workspace_resource_id_secret_name }}
+          tfstate_resource_group_secret_name: ${{ needs.validate_request.outputs.tfstate_resource_group_secret_name }}
+          tfstate_storage_account_secret_name: ${{ needs.validate_request.outputs.tfstate_storage_account_secret_name }}
+          tfstate_container_secret_name: ${{ needs.validate_request.outputs.tfstate_container_secret_name }}
+          tfstate_key_secret_name: ${{ needs.validate_request.outputs.tfstate_key_secret_name }}
           tfstate_key_suffix: cluster-adgroup
 
       - name: Terraform apply
@@ -209,7 +244,16 @@ jobs:
           azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
-          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          keyvault_name: ${{ needs.validate_request.outputs.keyvault_name }}
+          databricks_host_secret_name: ${{ needs.validate_request.outputs.databricks_host_secret_name }}
+          databricks_client_id_secret_name: ${{ needs.validate_request.outputs.databricks_client_id_secret_name }}
+          databricks_client_secret_secret_name: ${{ needs.validate_request.outputs.databricks_client_secret_secret_name }}
+          databricks_tenant_id_secret_name: ${{ needs.validate_request.outputs.databricks_tenant_id_secret_name }}
+          databricks_workspace_resource_id_secret_name: ${{ needs.validate_request.outputs.databricks_workspace_resource_id_secret_name }}
+          tfstate_resource_group_secret_name: ${{ needs.validate_request.outputs.tfstate_resource_group_secret_name }}
+          tfstate_storage_account_secret_name: ${{ needs.validate_request.outputs.tfstate_storage_account_secret_name }}
+          tfstate_container_secret_name: ${{ needs.validate_request.outputs.tfstate_container_secret_name }}
+          tfstate_key_secret_name: ${{ needs.validate_request.outputs.tfstate_key_secret_name }}
           tfstate_key_suffix: cluster-adgroup
 
       - name: Validate live Databricks cluster access
@@ -281,7 +325,7 @@ jobs:
           azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
           azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
-          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          keyvault_name: ${{ needs.validate_request.outputs.keyvault_name }}
           subject: "UDA Databricks Cluster AD Group REMOVE Completed - ${{ needs.validate_request.outputs.request_id }}"
           body: |
             UDA Databricks Cluster AD Group REMOVE workflow completed.
