@@ -106,6 +106,7 @@ jobs:
           echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
           echo "NORMALIZED_JSON=$output_dir/$request_id.normalized.json" >> "$GITHUB_ENV"
           echo "TFVARS_JSON=$output_dir/$request_id.auto.tfvars.json" >> "$GITHUB_ENV"
+          echo "CURRENT_TARGETS_JSON=$output_dir/$request_id.current-targets.json" >> "$GITHUB_ENV"
           echo "TFPLAN_BIN=$output_dir/schema-creation.tfplan" >> "$GITHUB_ENV"
           echo "TFPLAN_TXT=$output_dir/schema-creation-plan.txt" >> "$GITHUB_ENV"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
@@ -143,13 +144,21 @@ jobs:
         run: |
           terraform -chdir="$TF_WORKDIR" state pull > "$OUTPUT_DIR/pre-migration-state.json"
 
-      - name: Generate request tfvars
+      - name: Generate shared-state tfvars
         shell: bash
         run: |
           set -euo pipefail
+          existing_ids_file="$OUTPUT_DIR/existing-schema-request-ids.txt"
+          terraform -chdir="$TF_WORKDIR" state list | python -c \
+            'import re,sys; ids={match.group(1) for line in sys.stdin for match in [re.match(r"^module\.schema_creation\[\"([^\"]+)\"\]\.", line)] if match}; print("\n".join(sorted(ids)))' \
+            > "$existing_ids_file"
+
           python uda/scripts/schema-creation/generate_tfvars.py \
             --input-json "$NORMALIZED_JSON" \
             --output-json "$TFVARS_JSON" \
+            --current-targets-json "$CURRENT_TARGETS_JSON" \
+            --existing-request-ids-file "$existing_ids_file" \
+            --requests-directory requests/schema-creation \
             --terraform-variables-file terraform/environments/dev/variables.tf
 
       - name: Build request Terraform targets
@@ -157,15 +166,15 @@ jobs:
         run: |
           set -euo pipefail
           targets_file="$OUTPUT_DIR/schema-terraform-targets.txt"
-          jq -r '.schema_creation_requests | keys[] | "module.schema_creation[\"" + . + "\"]"' \
-            "$TFVARS_JSON" > "$targets_file"
+          jq -r 'keys[] | "module.schema_creation[\"" + . + "\"]"' \
+            "$CURRENT_TARGETS_JSON" > "$targets_file"
 
           jq -r '
-            [.schema_creation_requests[] | select(.target_type == "communitymart") |
+            [.[] | select(.target_type == "communitymart") |
              ((.target_catalog | ascii_downcase) + "|" + (.ad_group_name | ascii_downcase))] |
             unique[] |
             "databricks_grant.communitymart_ad_group_catalog[\"" + . + "\"]"
-          ' "$TFVARS_JSON" >> "$targets_file"
+          ' "$CURRENT_TARGETS_JSON" >> "$targets_file"
 
           if [ ! -s "$targets_file" ]; then
             echo "No Terraform targets were generated for $REQUEST_FILE." >&2

@@ -78,6 +78,15 @@ def test_build_shared_payload_detaches_state_when_request_source_was_deleted(tmp
     assert set(payload["schema_creation_requests"]) == {"PRD|edlbi_ss|slfsrv_new_schema"}
 
 
+def test_build_shared_payload_rejects_missing_state_source_by_default(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="vw_deleted"):
+        generator.build_shared_tfvars_payload(
+            _normalized("RITM-NEW", "slfsrv_new_schema"),
+            existing_request_ids={"PRD|edl_communitymart|vw_deleted"},
+            requests_directory=tmp_path,
+        )
+
+
 def test_render_orphaned_state_keys_is_sorted_and_deduplicated() -> None:
     rendered = generator.render_orphaned_state_keys(
         ["PRD|edlbi_ss|slfsrv_deleted", "PRD|edl_communitymart|vw_deleted", "PRD|edlbi_ss|slfsrv_deleted"]

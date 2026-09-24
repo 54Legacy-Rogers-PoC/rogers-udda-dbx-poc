@@ -131,12 +131,14 @@ def test_schema_workflow_targets_only_current_request_keys() -> None:
     workflow = _workflow()
     plan_job = workflow["jobs"]["plan-schema-creation"]
     steps = {step.get("name"): step for step in plan_job["steps"]}
-    generate_run = steps["Generate request tfvars"]["run"]
+    generate_run = steps["Generate shared-state tfvars"]["run"]
     targets_run = steps["Build request Terraform targets"]["run"]
 
-    assert "--existing-request-ids-file" not in generate_run
-    assert "--requests-directory" not in generate_run
-    assert "schema_creation_requests | keys[]" in targets_run
+    assert "--existing-request-ids-file" in generate_run
+    assert "--requests-directory requests/schema-creation" in generate_run
+    assert '--current-targets-json "$CURRENT_TARGETS_JSON"' in generate_run
+    assert 'keys[] | "module.schema_creation' in targets_run
+    assert '"$CURRENT_TARGETS_JSON"' in targets_run
     assert "communitymart_ad_group_catalog" in targets_run
     assert "Forget state for deleted request sources" not in steps
     assert "Migrate legacy schema state address" not in steps

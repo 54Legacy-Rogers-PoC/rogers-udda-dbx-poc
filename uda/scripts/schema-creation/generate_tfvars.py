@@ -251,7 +251,10 @@ def build_shared_tfvars_payload(
         else:
             if orphaned_state_keys is not None:
                 orphaned_state_keys.append(state_key)
-            continue
+                continue
+            raise ValueError(
+                f"State-backed schema key {state_key} has no matching source under {requests_directory}"
+            )
 
         for target_key, target in existing_targets.items():
             existing_environment = _normalize(target["environment"]).upper()
@@ -317,6 +320,10 @@ def parse_args() -> argparse.Namespace:
         help="Optional output file listing state keys whose request source was deleted",
     )
     parser.add_argument(
+        "--current-targets-json",
+        help="Optional output file containing only schema targets from the current request",
+    )
+    parser.add_argument(
         "--terraform-variables-file",
         default="terraform/variables.tf",
         help="Path to Terraform variables.tf used to validate tfvars contract",
@@ -362,6 +369,12 @@ def main() -> int:
 
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(json.dumps(tfvars_payload, indent=2) + "\n", encoding="utf-8")
+    if args.current_targets_json:
+        current_targets_file = Path(args.current_targets_json).resolve()
+        current_targets_file.write_text(
+            json.dumps(_build_schema_targets(normalized_payload), indent=2) + "\n",
+            encoding="utf-8",
+        )
     if args.orphaned_state_keys_file:
         orphaned_file = Path(args.orphaned_state_keys_file).resolve()
         orphaned_file.write_text(render_orphaned_state_keys(orphaned_state_keys), encoding="utf-8")
