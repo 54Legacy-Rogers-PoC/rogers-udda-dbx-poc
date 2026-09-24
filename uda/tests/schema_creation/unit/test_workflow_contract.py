@@ -134,6 +134,26 @@ def test_schema_workflow_preserves_state_backed_request_keys() -> None:
     assert "state list" in generate_step["run"]
     assert "--existing-request-ids-file" in generate_step["run"]
     assert "--requests-directory requests/schema-creation" in generate_step["run"]
+    assert '--orphaned-state-keys-file "$OUTPUT_DIR/orphaned-schema-state-keys.txt"' in generate_step["run"]
+
+    cleanup_step = next(
+        step for step in plan_job["steps"] if step.get("name") == "Forget state for deleted request sources"
+    )
+    assert "terraform" in cleanup_step["run"]
+    assert "state rm" in cleanup_step["run"]
+    assert "remote Databricks resources are unchanged" in cleanup_step["run"]
+    assert "github.event_name == 'push'" in cleanup_step["if"]
+    assert "inputs.run_apply" in cleanup_step["if"]
+
+
+def test_schema_workflow_discovers_added_request_files_only() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    collector = (repo_root / "uda" / "scripts" / "schema-creation" / "collect_request_files.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--diff-filter=A " in collector
+    assert "--diff-filter=AM " not in collector
 
 
 def test_schema_workflow_migrates_catalog_grants_to_shared_ownership() -> None:

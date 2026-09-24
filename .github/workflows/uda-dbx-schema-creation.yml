@@ -177,7 +177,21 @@ jobs:
             --output-json "$TFVARS_JSON" \
             --existing-request-ids-file "$existing_ids_file" \
             --requests-directory requests/schema-creation \
+            --orphaned-state-keys-file "$OUTPUT_DIR/orphaned-schema-state-keys.txt" \
             --terraform-variables-file terraform/environments/dev/variables.tf
+
+      - name: Forget state for deleted request sources
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          orphaned_keys_file="$OUTPUT_DIR/orphaned-schema-state-keys.txt"
+          while IFS= read -r state_key; do
+            [ -z "$state_key" ] && continue
+            address="module.schema_creation[\"$state_key\"]"
+            echo "Forgetting $address from Terraform state; remote Databricks resources are unchanged."
+            terraform -chdir="$TF_WORKDIR" state rm "$address"
+          done < "$orphaned_keys_file"
 
       - name: Migrate shared community mart catalog grants
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}

@@ -64,13 +64,29 @@ def test_build_shared_payload_preserves_existing_request(tmp_path: Path) -> None
     assert old_target["target_type"] == "sandbox"
 
 
-def test_build_shared_payload_fails_when_state_request_has_no_source(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="RITM-MISSING"):
-        generator.build_shared_tfvars_payload(
-            _normalized("RITM-NEW", "slfsrv_new_schema"),
-            existing_request_ids={"RITM-MISSING"},
-            requests_directory=tmp_path,
-        )
+def test_build_shared_payload_detaches_state_when_request_source_was_deleted(tmp_path: Path) -> None:
+    orphaned_state_keys: list[str] = []
+
+    payload = generator.build_shared_tfvars_payload(
+        _normalized("RITM-NEW", "slfsrv_new_schema"),
+        existing_request_ids={"PRD|edl_communitymart|vw_deleted"},
+        requests_directory=tmp_path,
+        orphaned_state_keys=orphaned_state_keys,
+    )
+
+    assert orphaned_state_keys == ["PRD|edl_communitymart|vw_deleted"]
+    assert set(payload["schema_creation_requests"]) == {"PRD|edlbi_ss|slfsrv_new_schema"}
+
+
+def test_render_orphaned_state_keys_is_sorted_and_deduplicated() -> None:
+    rendered = generator.render_orphaned_state_keys(
+        ["PRD|edlbi_ss|slfsrv_deleted", "PRD|edl_communitymart|vw_deleted", "PRD|edlbi_ss|slfsrv_deleted"]
+    )
+
+    assert rendered.splitlines() == [
+        "PRD|edl_communitymart|vw_deleted",
+        "PRD|edlbi_ss|slfsrv_deleted",
+    ]
 
 
 def test_build_shared_payload_rejects_mixed_environments(tmp_path: Path) -> None:

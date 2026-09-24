@@ -224,6 +224,7 @@ def build_shared_tfvars_payload(
     *,
     existing_request_ids: set[str],
     requests_directory: Path,
+    orphaned_state_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     current_values = _build_request_values(current_payload)
     current_request_id = current_values["request_id"]
@@ -248,9 +249,9 @@ def build_shared_tfvars_payload(
                 raise ValueError(f"State-backed schema target {state_key} has multiple request sources: {owners}")
             existing_targets = {state_key: matches[0]}
         else:
-            raise ValueError(
-                f"State-backed schema key {state_key} has no matching source under {requests_directory}"
-            )
+            if orphaned_state_keys is not None:
+                orphaned_state_keys.append(state_key)
+            continue
 
         for target_key, target in existing_targets.items():
             existing_environment = _normalize(target["environment"]).upper()
@@ -282,6 +283,11 @@ def build_shared_tfvars_payload(
     }
 
 
+def render_orphaned_state_keys(state_keys: list[str]) -> str:
+    unique_keys = sorted(set(state_keys))
+    return "" if not unique_keys else "\n".join(unique_keys) + "\n"
+
+
 def build_tfvars_payload(normalized_payload: dict[str, Any]) -> dict[str, Any]:
     tfvars_payload: dict[str, Any] = {
         "schema_creation_enabled": True,
@@ -307,6 +313,10 @@ def parse_args() -> argparse.Namespace:
         help="Request source directory used to reconstruct state-backed request inputs",
     )
     parser.add_argument(
+        "--orphaned-state-keys-file",
+        help="Optional output file listing state keys whose request source was deleted",
+    )
+    parser.add_argument(
         "--terraform-variables-file",
         default="terraform/variables.tf",
         help="Path to Terraform variables.tf used to validate tfvars contract",
@@ -322,6 +332,7 @@ def main() -> int:
 
     try:
         normalized_payload = _load_json(input_json)
+        orphaned_state_keys: list[str] = []
         if args.existing_request_ids_file:
             ids_path = Path(args.existing_request_ids_file).resolve()
             existing_request_ids = {
@@ -331,6 +342,7 @@ def main() -> int:
                 normalized_payload,
                 existing_request_ids=existing_request_ids,
                 requests_directory=Path(args.requests_directory).resolve(),
+                orphaned_state_keys=orphaned_state_keys,
             )
         else:
             tfvars_payload = build_tfvars_payload(normalized_payload)
@@ -350,6 +362,11 @@ def main() -> int:
 
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(json.dumps(tfvars_payload, indent=2) + "\n", encoding="utf-8")
+    if args.orphaned_state_keys_file:
+        orphaned_file = Path(args.orphaned_state_keys_file).resolve()
+        orphaned_file.write_text(render_orphaned_state_keys(orphaned_state_keys), encoding="utf-8")
+        for state_key in orphaned_state_keys:
+            print(f"Request source deleted; state cleanup required for: {state_key}")
     print(f"tfvars generated: {output_json}")
     return 0
 
