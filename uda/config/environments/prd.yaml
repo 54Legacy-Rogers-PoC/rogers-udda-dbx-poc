@@ -2,7 +2,7 @@
 code: PRD
 
 azure:
-  keyvault_name: kv-udda-prd
+  keyvault_name: kv-cpo-dev-cac
 
 keyvault_secrets:
   databricks_host: DATABRICKS-HOST
