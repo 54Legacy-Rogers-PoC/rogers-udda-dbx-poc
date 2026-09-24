@@ -50,8 +50,6 @@ def test_pull_requests_run_plan_but_never_apply_or_mutate_state() -> None:
     assert "if" not in steps["Terraform plan"]
     for name in (
         "Back up Terraform state before migration",
-        "Migrate legacy schema state address",
-        "Migrate shared community mart catalog grants",
         "Terraform apply",
     ):
         condition = steps[name]["if"]
@@ -109,41 +107,30 @@ def test_schema_workflow_uses_repo_root_paths_for_plan_files() -> None:
 
     assert '-var-file="$GITHUB_WORKSPACE/$TFVARS_JSON"' in run_text
     assert '-out="$GITHUB_WORKSPACE/$TFPLAN_BIN"' in run_text
-    assert "-target=" not in run_text
+    assert 'target_args+=("-target=$address")' in run_text
+    assert '"${target_args[@]}"' in run_text
     assert "../../$TFVARS_JSON" not in run_text
     assert "../../$TFPLAN_BIN" not in run_text
 
 
-def test_schema_workflow_migrates_legacy_module_address() -> None:
+def test_schema_workflow_targets_only_current_request_keys() -> None:
     workflow = _workflow()
     plan_job = workflow["jobs"]["plan-schema-creation"]
-    migration_step = next(
-        step for step in plan_job["steps"] if step.get("name") == "Migrate legacy schema state address"
-    )
+    steps = {step.get("name"): step for step in plan_job["steps"]}
+    generate_run = steps["Generate request tfvars"]["run"]
+    targets_run = steps["Build request Terraform targets"]["run"]
 
-    assert "state mv" in migration_step["run"]
-    assert "module.schema_creation[0]" in migration_step["run"]
+    assert "--existing-request-ids-file" not in generate_run
+    assert "--requests-directory" not in generate_run
+    assert "schema_creation_requests | keys[]" in targets_run
+    assert "communitymart_ad_group_catalog" in targets_run
+    assert "Forget state for deleted request sources" not in steps
+    assert "Migrate legacy schema state address" not in steps
+    assert "Migrate shared community mart catalog grants" not in steps
 
-
-def test_schema_workflow_preserves_state_backed_request_keys() -> None:
-    workflow = _workflow()
-    plan_job = workflow["jobs"]["plan-schema-creation"]
-    generate_step = next(step for step in plan_job["steps"] if step.get("name") == "Generate shared-state tfvars")
-
-    assert "terraform" in generate_step["run"]
-    assert "state list" in generate_step["run"]
-    assert "--existing-request-ids-file" in generate_step["run"]
-    assert "--requests-directory requests/schema-creation" in generate_step["run"]
-    assert '--orphaned-state-keys-file "$OUTPUT_DIR/orphaned-schema-state-keys.txt"' in generate_step["run"]
-
-    cleanup_step = next(
-        step for step in plan_job["steps"] if step.get("name") == "Forget state for deleted request sources"
-    )
-    assert "terraform" in cleanup_step["run"]
-    assert "state rm" in cleanup_step["run"]
-    assert "remote Databricks resources are unchanged" in cleanup_step["run"]
-    assert "github.event_name == 'push'" in cleanup_step["if"]
-    assert "inputs.run_apply" in cleanup_step["if"]
+    workflow_run_text = "\n".join(str(step.get("run", "")) for step in plan_job["steps"])
+    assert "terraform -chdir=\"$TF_WORKDIR\" state mv" not in workflow_run_text
+    assert "terraform -chdir=\"$TF_WORKDIR\" state rm" not in workflow_run_text
 
 
 def test_schema_workflow_discovers_added_request_files_only() -> None:
@@ -154,35 +141,6 @@ def test_schema_workflow_discovers_added_request_files_only() -> None:
 
     assert "--diff-filter=A " in collector
     assert "--diff-filter=AM " not in collector
-
-
-def test_schema_workflow_migrates_catalog_grants_to_shared_ownership() -> None:
-    workflow = _workflow()
-    plan_job = workflow["jobs"]["plan-schema-creation"]
-    migration_step = next(
-        step for step in plan_job["steps"] if step.get("name") == "Migrate shared community mart catalog grants"
-    )
-
-    run_text = migration_step["run"]
-    assert "communitymart_ad_group_catalog" in run_text
-    assert "state rm" in run_text
-    assert "state mv" in run_text
-    assert "Databricks permission is unchanged" in run_text
-    assert " import " not in run_text
-
-
-def test_schema_workflow_migrates_request_keys_to_schema_target_keys() -> None:
-    workflow = _workflow()
-    steps = workflow["jobs"]["plan-schema-creation"]["steps"]
-    migration_step = next(
-        step for step in steps if step.get("name") == "Migrate schema resources to stable target keys"
-    )
-
-    assert "migrate_schema_state_keys.py" in migration_step["run"]
-    assert "--tfvars-json" in migration_step["run"]
-    assert "--state-addresses-file" in migration_step["run"]
-    assert "--output-file" in migration_step["run"]
-    assert "if" not in migration_step
 
 
 def test_communitymart_catalog_grants_are_owned_once_at_root() -> None:
@@ -203,7 +161,8 @@ def test_schema_module_uses_managed_storage_and_retires_external_locations() -> 
         encoding="utf-8"
     )
 
-    assert "storage_root" not in module_main
+    assert "storage_root =" not in module_main
+    assert module_main.count("ignore_changes        = [storage_root]") == 2
     assert 'resource "databricks_external_location"' not in module_main
     assert 'resource "databricks_grants" "sandbox_external_location_access"' not in module_main
     assert "from = databricks_external_location.sandbox" in module_main

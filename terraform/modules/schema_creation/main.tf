@@ -104,6 +104,7 @@ resource "databricks_schema" "sandbox" {
   lifecycle {
     create_before_destroy = true
     prevent_destroy       = true
+    ignore_changes        = [storage_root]
   }
 }
 
@@ -162,6 +163,7 @@ resource "databricks_schema" "communitymart" {
   lifecycle {
     create_before_destroy = true
     prevent_destroy       = true
+    ignore_changes        = [storage_root]
   }
 }
 

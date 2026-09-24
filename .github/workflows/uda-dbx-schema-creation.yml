@@ -143,104 +143,52 @@ jobs:
         run: |
           terraform -chdir="$TF_WORKDIR" state pull > "$OUTPUT_DIR/pre-migration-state.json"
 
-      - name: Migrate legacy schema state address
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
+      - name: Generate request tfvars
         shell: bash
         run: |
           set -euo pipefail
-          legacy_address='module.schema_creation[0]'
-          if terraform -chdir="$TF_WORKDIR" state list | grep -Fq "$legacy_address."; then
-            legacy_request_id="$(terraform -chdir="$TF_WORKDIR" output -raw request_id)"
-            if [ -z "$legacy_request_id" ]; then
-              echo "Cannot migrate $legacy_address because the legacy request_id output is empty." >&2
-              exit 1
-            fi
-            destination="module.schema_creation[\"$legacy_request_id\"]"
-            echo "Migrating $legacy_address to $destination"
-            terraform -chdir="$TF_WORKDIR" state mv "$legacy_address" "$destination"
-          else
-            echo "Legacy schema module address is not present; migration is not required."
-          fi
-
-      - name: Generate shared-state tfvars
-        shell: bash
-        run: |
-          set -euo pipefail
-          existing_ids_file="$OUTPUT_DIR/existing-schema-request-ids.txt"
-          state_addresses_file="$OUTPUT_DIR/schema-state-addresses.txt"
-          terraform -chdir="$TF_WORKDIR" state list | tee "$state_addresses_file" | python -c \
-            'import re,sys; ids={match.group(1) for line in sys.stdin for match in [re.match(r"^module\.schema_creation\[\"([^\"]+)\"\]\.", line)] if match}; print("\n".join(sorted(ids)))' \
-            > "$existing_ids_file"
-
           python uda/scripts/schema-creation/generate_tfvars.py \
             --input-json "$NORMALIZED_JSON" \
             --output-json "$TFVARS_JSON" \
-            --existing-request-ids-file "$existing_ids_file" \
-            --requests-directory requests/schema-creation \
-            --orphaned-state-keys-file "$OUTPUT_DIR/orphaned-schema-state-keys.txt" \
             --terraform-variables-file terraform/environments/dev/variables.tf
 
-      - name: Forget state for deleted request sources
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
+      - name: Build request Terraform targets
         shell: bash
         run: |
           set -euo pipefail
-          orphaned_keys_file="$OUTPUT_DIR/orphaned-schema-state-keys.txt"
-          while IFS= read -r state_key; do
-            [ -z "$state_key" ] && continue
-            address="module.schema_creation[\"$state_key\"]"
-            echo "Forgetting $address from Terraform state; remote Databricks resources are unchanged."
-            terraform -chdir="$TF_WORKDIR" state rm "$address"
-          done < "$orphaned_keys_file"
+          targets_file="$OUTPUT_DIR/schema-terraform-targets.txt"
+          jq -r '.schema_creation_requests | keys[] | "module.schema_creation[\"" + . + "\"]"' \
+            "$TFVARS_JSON" > "$targets_file"
 
-      - name: Migrate shared community mart catalog grants
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_apply) }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS= read -r legacy_address; do
-            state_values="$(terraform -chdir="$TF_WORKDIR" state show -no-color "$legacy_address")"
-            catalog="$(printf '%s\n' "$state_values" | sed -n 's/^ *catalog *= *"\([^"]*\)".*/\1/p' | head -n 1)"
-            principal="$(printf '%s\n' "$state_values" | sed -n 's/^ *principal *= *"\([^"]*\)".*/\1/p' | head -n 1)"
+          jq -r '
+            [.schema_creation_requests[] | select(.target_type == "communitymart") |
+             ((.target_catalog | ascii_downcase) + "|" + (.ad_group_name | ascii_downcase))] |
+            unique[] |
+            "databricks_grant.communitymart_ad_group_catalog[\"" + . + "\"]"
+          ' "$TFVARS_JSON" >> "$targets_file"
 
-            if [ -z "$catalog" ] || [ -z "$principal" ]; then
-              echo "Cannot read catalog grant identity from $legacy_address" >&2
-              exit 1
-            fi
+          if [ ! -s "$targets_file" ]; then
+            echo "No Terraform targets were generated for $REQUEST_FILE." >&2
+            exit 1
+          fi
 
-            key="${catalog,,}|${principal,,}"
-            canonical_address="databricks_grant.communitymart_ad_group_catalog[\"$key\"]"
-            if terraform -chdir="$TF_WORKDIR" state list | grep -Fxq "$canonical_address"; then
-              legacy_id="$(printf '%s\n' "$state_values" | sed -n 's/^ *id *= *"\([^"]*\)".*/\1/p' | head -n 1)"
-              canonical_values="$(terraform -chdir="$TF_WORKDIR" state show -no-color "$canonical_address")"
-              canonical_id="$(printf '%s\n' "$canonical_values" | sed -n 's/^ *id *= *"\([^"]*\)".*/\1/p' | head -n 1)"
-              if [ -z "$legacy_id" ] || [ "$legacy_id" != "$canonical_id" ]; then
-                echo "Refusing to remove $legacy_address because its remote ID differs from $canonical_address." >&2
-                exit 1
-              fi
-              echo "Removing duplicate state reference $legacy_address; Databricks permission is unchanged."
-              terraform -chdir="$TF_WORKDIR" state rm "$legacy_address"
-            else
-              echo "Moving $legacy_address to $canonical_address; Databricks permission is unchanged."
-              terraform -chdir="$TF_WORKDIR" state mv "$legacy_address" "$canonical_address"
-            fi
-          done < <(
-            terraform -chdir="$TF_WORKDIR" state list |
-              grep -E '^module\.schema_creation\["[^"]+"\]\.databricks_grant\.communitymart_ad_group_catalog\[0\]$' || true
-          )
-
-      - name: Migrate schema resources to stable target keys
-        run: |
-          python uda/scripts/schema-creation/migrate_schema_state_keys.py \
-            --state-addresses-file "$OUTPUT_DIR/schema-state-addresses.txt" \
-            --tfvars-json "$TFVARS_JSON" \
-            --output-file "$TF_WORKDIR/generated-schema-moves.tf"
+          echo "Terraform will operate only on:"
+          cat "$targets_file"
 
       - name: Terraform plan
+        shell: bash
         run: |
+          set -euo pipefail
+          target_args=()
+          while IFS= read -r address; do
+            [ -z "$address" ] && continue
+            target_args+=("-target=$address")
+          done < "$OUTPUT_DIR/schema-terraform-targets.txt"
+
           terraform -chdir="$TF_WORKDIR" plan \
             -lock-timeout=10m \
             -var-file="$GITHUB_WORKSPACE/$TFVARS_JSON" \
+            "${target_args[@]}" \
             -out="$GITHUB_WORKSPACE/$TFPLAN_BIN"
 
           terraform -chdir="$TF_WORKDIR" show -no-color "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$TFPLAN_TXT"
