@@ -198,6 +198,7 @@ def test_schema_workflow_discovers_added_request_files_only() -> None:
     assert r'\"deployment_environment\"' in collector
     assert r'\"environment_code\"' in collector
     assert r'\"tfstate_key_suffix\"' in collector
+    assert "printf '%s|%s|%s\\n'" in collector
 
 
 def test_schema_workflow_has_no_obsolete_state_backup_or_artifact_download() -> None:

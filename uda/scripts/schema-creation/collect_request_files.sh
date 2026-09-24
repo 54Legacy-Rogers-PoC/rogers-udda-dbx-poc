@@ -89,9 +89,9 @@ done
 
 request_environment() {
   case "$1" in
-    requests/schema-creation/dev/*) printf '%s|%s|%s' "dev" "DEV" "schema-creation-v2-dev" ;;
-    requests/schema-creation/qa/*) printf '%s|%s|%s' "qa" "QA" "schema-creation-v2-qa" ;;
-    requests/schema-creation/prd/*) printf '%s|%s|%s' "prd" "PRD" "schema-creation-v2" ;;
+    requests/schema-creation/dev/*) printf '%s|%s|%s\n' "dev" "DEV" "schema-creation-v2-dev" ;;
+    requests/schema-creation/qa/*) printf '%s|%s|%s\n' "qa" "QA" "schema-creation-v2-qa" ;;
+    requests/schema-creation/prd/*) printf '%s|%s|%s\n' "prd" "PRD" "schema-creation-v2" ;;
     *) echo "Unsupported schema request path: $1" >&2; return 1 ;;
   esac
 }
