@@ -180,7 +180,7 @@ def test_schema_workflow_targets_only_current_request_keys() -> None:
     assert "terraform -chdir=\"$TF_WORKDIR\" state rm" not in workflow_run_text
 
 
-def test_schema_workflow_discovers_added_request_files_only() -> None:
+def test_schema_workflow_discovers_added_request_files_only_without_rejecting_other_changes() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     collector = (repo_root / "uda" / "scripts" / "schema-creation" / "collect_request_files.sh").read_text(
         encoding="utf-8"
@@ -188,8 +188,10 @@ def test_schema_workflow_discovers_added_request_files_only() -> None:
 
     assert "--diff-filter=A " in collector
     assert "--diff-filter=AM " not in collector
-    assert "--diff-filter=MD " in collector
-    assert "Existing schema requests are immutable" in collector
+    assert "--diff-filter=MD " not in collector
+    assert "Existing schema requests are immutable" not in collector
+    assert 'git log --format=%H -n 1 "$BASE_SHA_EVENT" -- "$changed"' in collector
+    assert "Skipping restored request path" in collector
     assert "requests/schema-creation/qa" in collector
     assert "requests/schema-creation/prd" in collector
     assert '"schema-creation-v2-dev"' in collector

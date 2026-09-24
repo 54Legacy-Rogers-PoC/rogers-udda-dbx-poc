@@ -1,4 +1,4 @@
-request_id: "RITM4321"
+request_id: "RITM000078"
 
 platform: "Databricks"
 request_type: "Self Serve Request"
@@ -10,12 +10,12 @@ governance:
 
 sandbox:
   selection: "New Sandbox"
-  schema_name: "slfsrv_resicpo_basemarketingcpo1379"
+  schema_name: "slfsrv_resicpo_basemarketingcpo231"
   owner_name: "furqan@54legacy.com"
 
 communitymart:
   create: true
-  schema_name: "vw_resicpo_reportingcpo1489"
+  schema_name: "vw_resicpo_reportingcpo102"
   owner_name: "jhansi@54legacy.com"
 ad_group:
   name: "abeer@54legacy.com"

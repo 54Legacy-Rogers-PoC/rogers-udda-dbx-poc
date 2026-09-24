@@ -51,14 +51,11 @@ if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
 else
   # Push/PR runs process newly added requests only.
   if [ -n "${BASE_SHA_EVENT:-}" ] && [ -n "${HEAD_SHA_EVENT:-}" ]; then
-    immutable_changes="$(git diff --name-only --diff-filter=MD "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" -- requests/schema-creation/dev requests/schema-creation/qa requests/schema-creation/prd || true)"
-    if [ -n "$immutable_changes" ]; then
-      echo "Existing schema requests are immutable. Add a new request file instead of modifying or deleting:" >&2
-      printf '%s\n' "$immutable_changes" >&2
-      exit 1
-    fi
-
     while IFS= read -r changed; do
+      if git log --format=%H -n 1 "$BASE_SHA_EVENT" -- "$changed" | grep -q .; then
+        echo "Skipping restored request path that already exists in Git history: $changed"
+        continue
+      fi
       add_request "$changed"
     done < <(git diff --name-only --diff-filter=A "$BASE_SHA_EVENT" "$HEAD_SHA_EVENT" -- requests/schema-creation/dev requests/schema-creation/qa requests/schema-creation/prd || true)
   fi

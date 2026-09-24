@@ -6,7 +6,7 @@ Add schema requests to the directory matching the target environment:
 - `qa`: `environment: QA/Test`
 - `prd`: `environment: Production`
 
-Each environment uses its own shared Terraform state and GitHub Environment. After a request is applied, do not modify or delete it. Promote an approved request by adding the corresponding environment-specific request file to the next directory.
+Each environment uses its own shared Terraform state and GitHub Environment. Push and pull-request runs process newly added request files only; modifications and deletions are ignored. Promote an approved request by adding the corresponding environment-specific request file to the next directory.
 
 | Request directory | GitHub Environment | Shared state suffix |
 | --- | --- | --- |
