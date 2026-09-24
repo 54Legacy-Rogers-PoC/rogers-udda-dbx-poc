@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -85,6 +86,34 @@ def test_build_shared_payload_rejects_missing_state_source_by_default(tmp_path: 
             existing_request_ids={"PRD|edl_communitymart|vw_deleted"},
             requests_directory=tmp_path,
         )
+
+
+def test_cli_rejects_missing_state_source_without_orphan_output(tmp_path: Path) -> None:
+    current = _normalized("RITM-NEW", "slfsrv_new_schema")
+    input_json = tmp_path / "input.json"
+    output_json = tmp_path / "output.json"
+    state_keys = tmp_path / "state-keys.txt"
+    variables_file = Path(__file__).resolve().parents[4] / "terraform" / "environments" / "dev" / "variables.tf"
+    input_json.write_text(json.dumps(current), encoding="utf-8")
+    state_keys.write_text("PRD|edl_communitymart|vw_deleted\n", encoding="utf-8")
+
+    argv = [
+        "generate_tfvars.py",
+        "--input-json",
+        str(input_json),
+        "--output-json",
+        str(output_json),
+        "--existing-request-ids-file",
+        str(state_keys),
+        "--requests-directory",
+        str(tmp_path),
+        "--terraform-variables-file",
+        str(variables_file),
+    ]
+    with patch.object(sys, "argv", argv):
+        assert generator.main() == 1
+
+    assert not output_json.exists()
 
 
 def test_render_orphaned_state_keys_is_sorted_and_deduplicated() -> None:

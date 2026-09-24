@@ -71,6 +71,8 @@ def test_workflow_has_no_removal_override_and_rejects_delete_actions() -> None:
     assert "ALLOW_DESTROY" not in run_text
     assert "allow_destroy" not in run_text
     assert 'if [ "$removal_count" -gt 0 ]' in run_text
+    assert "Plan contains changes outside the current request targets" in run_text
+    assert 'change["address"] == target' in run_text
 
 
 def test_deployment_is_main_only_and_uses_protected_environment() -> None:
@@ -157,6 +159,16 @@ def test_schema_workflow_discovers_added_request_files_only() -> None:
 
     assert "--diff-filter=A " in collector
     assert "--diff-filter=AM " not in collector
+    assert "--diff-filter=MD " in collector
+    assert "Existing schema requests are immutable" in collector
+
+
+def test_schema_workflow_does_not_publish_state_backup() -> None:
+    steps = _workflow()["jobs"]["plan-schema-creation"]["steps"]
+    publish_step = next(step for step in steps if step.get("name") == "Publish plan outputs")
+
+    assert "pre-migration-state.json" in publish_step["with"]["path"]
+    assert "!${{ steps.prep_paths.outputs.output_dir }}/pre-migration-state.json" in publish_step["with"]["path"]
 
 
 def test_communitymart_catalog_grants_are_owned_once_at_root() -> None:
@@ -168,6 +180,7 @@ def test_communitymart_catalog_grants_are_owned_once_at_root() -> None:
 
     assert 'resource "databricks_grant" "communitymart_ad_group_catalog"' in root_main
     assert '"${jsondecode(encoded).catalog}|${jsondecode(encoded).principal}"' in root_main
+    assert "prevent_destroy = true" in root_main
     assert 'resource "databricks_grant" "communitymart_ad_group_catalog"' not in module_main
 
 

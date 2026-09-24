@@ -205,8 +205,33 @@ jobs:
       - name: Enforce create-or-update-only plan
         shell: bash
         run: |
+          set -euo pipefail
           PLAN_JSON="$OUTPUT_DIR/schema-creation-plan.json"
           terraform -chdir="$TF_WORKDIR" show -json "$GITHUB_WORKSPACE/$TFPLAN_BIN" > "$PLAN_JSON"
+
+          python - "$PLAN_JSON" "$OUTPUT_DIR/schema-terraform-targets.txt" <<'PY'
+          import json
+          import sys
+
+          plan_path, targets_path = sys.argv[1:]
+          with open(plan_path, encoding="utf-8") as handle:
+            plan = json.load(handle)
+          with open(targets_path, encoding="utf-8") as handle:
+            targets = [line.strip() for line in handle if line.strip()]
+
+          unexpected = sorted(
+            change["address"]
+            for change in plan.get("resource_changes", [])
+            if not any(
+              change["address"] == target or change["address"].startswith(f"{target}.")
+              for target in targets
+            )
+          )
+          if unexpected:
+            print("Plan contains changes outside the current request targets:", file=sys.stderr)
+            print("\n".join(unexpected), file=sys.stderr)
+            raise SystemExit(1)
+          PY
 
           removal_count="$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' "$PLAN_JSON")"
           echo "Plan removal/replacement action count: $removal_count"
@@ -226,7 +251,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: uda-dbx-schema-creation-plan-output-${{ steps.prep_paths.outputs.request_id }}
-          path: ${{ steps.prep_paths.outputs.output_dir }}
+          path: |
+            ${{ steps.prep_paths.outputs.output_dir }}
+            !${{ steps.prep_paths.outputs.output_dir }}/pre-migration-state.json
           if-no-files-found: warn
 
       - name: Write plan summary

@@ -159,6 +159,10 @@ resource "databricks_grant" "communitymart_ad_group_catalog" {
   catalog    = each.value.catalog
   principal  = each.value.principal
   privileges = ["USE_CATALOG"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Schema creation runs through the same root stack pattern as the other DDD

@@ -339,7 +339,7 @@ def main() -> int:
 
     try:
         normalized_payload = _load_json(input_json)
-        orphaned_state_keys: list[str] = []
+        orphaned_state_keys: list[str] | None = [] if args.orphaned_state_keys_file else None
         if args.existing_request_ids_file:
             ids_path = Path(args.existing_request_ids_file).resolve()
             existing_request_ids = {
@@ -376,6 +376,7 @@ def main() -> int:
             encoding="utf-8",
         )
     if args.orphaned_state_keys_file:
+        assert orphaned_state_keys is not None
         orphaned_file = Path(args.orphaned_state_keys_file).resolve()
         orphaned_file.write_text(render_orphaned_state_keys(orphaned_state_keys), encoding="utf-8")
         for state_key in orphaned_state_keys:
