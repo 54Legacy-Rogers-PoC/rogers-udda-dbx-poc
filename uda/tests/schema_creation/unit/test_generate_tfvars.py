@@ -65,6 +65,44 @@ def test_build_shared_payload_preserves_existing_request(tmp_path: Path) -> None
     assert old_target["target_type"] == "sandbox"
 
 
+def test_build_shared_payload_allows_duplicate_request_ids_for_distinct_state_targets(tmp_path: Path) -> None:
+    first = _normalized("RITM-DUPLICATE", "slfsrv_first")
+    second = _normalized("RITM-DUPLICATE", "slfsrv_second")
+    current = _normalized("RITM-NEW", "slfsrv_new")
+    requests_dir = tmp_path / "requests"
+    requests_dir.mkdir()
+    (requests_dir / "first.json").write_text(json.dumps(first), encoding="utf-8")
+    (requests_dir / "second.json").write_text(json.dumps(second), encoding="utf-8")
+
+    payload = generator.build_shared_tfvars_payload(
+        current,
+        existing_request_ids={"PRD|edlbi_ss|slfsrv_first", "PRD|edlbi_ss|slfsrv_second"},
+        requests_directory=requests_dir,
+    )
+
+    assert set(payload["schema_creation_requests"]) == {
+        "PRD|edlbi_ss|slfsrv_first",
+        "PRD|edlbi_ss|slfsrv_second",
+        "PRD|edlbi_ss|slfsrv_new",
+    }
+
+
+def test_build_shared_payload_rejects_ambiguous_legacy_request_id(tmp_path: Path) -> None:
+    first = _normalized("RITM-DUPLICATE", "slfsrv_first")
+    second = _normalized("RITM-DUPLICATE", "slfsrv_second")
+    requests_dir = tmp_path / "requests"
+    requests_dir.mkdir()
+    (requests_dir / "first.json").write_text(json.dumps(first), encoding="utf-8")
+    (requests_dir / "second.json").write_text(json.dumps(second), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Legacy state request ID RITM-DUPLICATE has multiple request sources"):
+        generator.build_shared_tfvars_payload(
+            _normalized("RITM-NEW", "slfsrv_new"),
+            existing_request_ids={"RITM-DUPLICATE"},
+            requests_directory=requests_dir,
+        )
+
+
 def test_build_shared_payload_detaches_state_when_request_source_was_deleted(tmp_path: Path) -> None:
     orphaned_state_keys: list[str] = []
 

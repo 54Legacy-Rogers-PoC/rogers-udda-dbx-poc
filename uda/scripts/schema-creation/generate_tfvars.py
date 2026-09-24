@@ -194,8 +194,8 @@ def _build_schema_targets(normalized_payload: dict[str, Any]) -> dict[str, dict[
     return targets
 
 
-def _load_request_index(requests_directory: Path) -> dict[str, dict[str, Any]]:
-    request_index: dict[str, dict[str, Any]] = {}
+def _load_request_index(requests_directory: Path) -> dict[str, list[dict[str, Any]]]:
+    request_index: dict[str, list[dict[str, Any]]] = {}
     paths = sorted(requests_directory.rglob("*.yml")) + sorted(requests_directory.rglob("*.yaml"))
     paths += sorted(requests_directory.rglob("*.json"))
 
@@ -212,9 +212,7 @@ def _load_request_index(requests_directory: Path) -> dict[str, dict[str, Any]]:
         request_id = _normalize(normalized.get("request_id"))
         if not request_id:
             continue
-        if request_id in request_index:
-            raise ValueError(f"Duplicate schema request_id found in request sources: {request_id}")
-        request_index[request_id] = normalized
+        request_index.setdefault(request_id, []).append(normalized)
 
     return request_index
 
@@ -230,9 +228,10 @@ def build_shared_tfvars_payload(
     current_request_id = current_values["request_id"]
     request_index = _load_request_index(requests_directory) if existing_request_ids else {}
     target_index: dict[str, list[dict[str, Any]]] = {}
-    for normalized in request_index.values():
-        for key, target in _build_schema_targets(normalized).items():
-            target_index.setdefault(key, []).append(target)
+    for requests in request_index.values():
+        for normalized in requests:
+            for key, target in _build_schema_targets(normalized).items():
+                target_index.setdefault(key, []).append(target)
 
     request_map: dict[str, dict[str, Any]] = {}
     current_environment = _normalize(current_values["environment"]).upper()
@@ -241,7 +240,12 @@ def build_shared_tfvars_payload(
         if state_key == current_request_id:
             existing_targets = _build_schema_targets(current_payload)
         elif state_key in request_index:
-            existing_targets = _build_schema_targets(request_index[state_key])
+            matches = request_index[state_key]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"Legacy state request ID {state_key} has multiple request sources; migrate the state address to a schema target key"
+                )
+            existing_targets = _build_schema_targets(matches[0])
         elif state_key in target_index:
             matches = target_index[state_key]
             if len(matches) != 1:
