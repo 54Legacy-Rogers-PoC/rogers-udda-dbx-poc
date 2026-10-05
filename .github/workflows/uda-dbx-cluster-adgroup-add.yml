@@ -101,11 +101,22 @@ jobs:
             generated/request_metadata.json
             generated/execution_log.json
 
+  terraform_validation:
+    name: Stage 3 Terraform Validation
+    needs:
+      - validate_request
+    uses: 54Legacy-Rogers-PoC/54legacy-Resusable-Workflows/.github/workflows/platform-terraform-validation.yml@main
+    with:
+      working-directory: terraform/environments/dev
+      terraform-version: "1.9.8"
+      fmt-recursive: true
+
   terraform_plan:
     name: Stage 3 Terraform Plan
     runs-on: ubuntu-latest
     needs:
       - validate_request
+      - terraform_validation
     outputs:
       tf_plan_status: ${{ steps.plan_status.outputs.tf_plan_status }}
     steps:
@@ -136,10 +147,6 @@ jobs:
           tfstate_container_secret_name: ${{ needs.validate_request.outputs.tfstate_container_secret_name }}
           tfstate_key_secret_name: ${{ needs.validate_request.outputs.tfstate_key_secret_name }}
           tfstate_key_suffix: cluster-adgroup
-
-      - name: Terraform validate
-        working-directory: terraform/environments/dev
-        run: terraform validate
 
       - name: Terraform plan
         working-directory: terraform/environments/dev
@@ -286,6 +293,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - validate_request
+      - terraform_validation
       - terraform_plan
       - terraform_apply
       - post_validate_cluster_access
@@ -313,6 +321,7 @@ jobs:
             echo "- Cluster ID: ${{ needs.validate_request.outputs.cluster_id }}"
             echo "- AD Group Name: ${{ needs.validate_request.outputs.ad_group_name }}"
             echo "- Permission Level: ${{ needs.validate_request.outputs.cluster_permission_level }}"
+            echo "- Terraform Validation Status: ${{ needs.terraform_validation.result }}"
             echo "- Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}"
             echo "- Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}"
             echo "- Post Validation Status: ${{ needs.post_validate_cluster_access.result || 'not_run' }}"
@@ -338,6 +347,7 @@ jobs:
             Cluster ID: ${{ needs.validate_request.outputs.cluster_id }}
             AD Group Name: ${{ needs.validate_request.outputs.ad_group_name }}
             Permission Level: ${{ needs.validate_request.outputs.cluster_permission_level }}
+            Terraform Validation Status: ${{ needs.terraform_validation.result }}
             Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}
             Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}
             Post Validation Status: ${{ needs.post_validate_cluster_access.result || 'not_run' }}

@@ -66,3 +66,25 @@ def test_staged_workflows_resolve_config_during_validation() -> None:
         resolver = next(step for step in validate_job["steps"] if step.get("id") == "environment_config")
         assert "uda/scripts/resolve_environment_config.py" in resolver["run"]
         assert validate_job["outputs"]["keyvault_name"] == "${{ steps.environment_config.outputs.keyvault_name }}"
+
+
+def test_cluster_adgroup_add_uses_reusable_terraform_validation() -> None:
+    jobs = _workflow("uda-dbx-cluster-adgroup-add.yml")["jobs"]
+    validation = jobs["terraform_validation"]
+    assert validation["uses"] == (
+        "54Legacy-Rogers-PoC/54legacy-Resusable-Workflows/"
+        ".github/workflows/platform-terraform-validation.yml@main"
+    )
+    assert validation["needs"] == ["validate_request"]
+    assert validation["with"] == {
+        "working-directory": "terraform/environments/dev",
+        "terraform-version": "1.9.8",
+        "fmt-recursive": True,
+    }
+    assert not {"steps", "runs-on", "outputs"} & validation.keys()
+    assert "terraform_validation" in jobs["terraform_plan"]["needs"]
+    assert "terraform_validation" in jobs["notification"]["needs"]
+    assert not any(
+        step.get("run", "").strip() == "terraform validate"
+        for step in jobs["terraform_plan"]["steps"]
+    )
