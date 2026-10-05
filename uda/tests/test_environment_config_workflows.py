@@ -95,7 +95,7 @@ def test_cluster_adgroup_add_uses_reusable_terraform_plan() -> None:
     plan = jobs["terraform_plan"]
     assert plan["uses"] == (
         "54Legacy-Rogers-PoC/54legacy-Resusable-Workflows/"
-        ".github/workflows/platform-terraform-plan.yml@main"
+        ".github/workflows/platform-terraform-plan.yml@ba1cb62f63fafd15a83708e41d4915b2dd2297b8"
     )
     assert not {"steps", "runs-on", "outputs"} & plan.keys()
     assert plan["with"]["terraform-version"] == "1.9.8"

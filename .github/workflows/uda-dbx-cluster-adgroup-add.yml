@@ -116,7 +116,7 @@ jobs:
     needs:
       - validate_request
       - terraform_validation
-    uses: 54Legacy-Rogers-PoC/54legacy-Resusable-Workflows/.github/workflows/platform-terraform-plan.yml@main
+    uses: 54Legacy-Rogers-PoC/54legacy-Resusable-Workflows/.github/workflows/platform-terraform-plan.yml@ba1cb62f63fafd15a83708e41d4915b2dd2297b8
     with:
       working-directory: terraform/environments/dev
       terraform-version: "1.9.8"
