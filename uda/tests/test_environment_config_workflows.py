@@ -14,6 +14,11 @@ WORKFLOWS = (
     "uda-dbx-cluster-adgroup-add.yml",
     "uda-dbx-cluster-adgroup-remove.yml",
 )
+LOCAL_SETUP_WORKFLOWS = tuple(
+    workflow_name
+    for workflow_name in WORKFLOWS
+    if workflow_name != "uda-dbx-service-account.yml"
+)
 CONFIGURED_SECRET_INPUTS = {
     "databricks_host_secret_name",
     "databricks_client_id_secret_name",
@@ -32,7 +37,7 @@ def _workflow(name: str) -> dict:
 
 
 def test_all_setup_calls_use_environment_config_outputs() -> None:
-    for workflow_name in WORKFLOWS:
+    for workflow_name in LOCAL_SETUP_WORKFLOWS:
         workflow = _workflow(workflow_name)
         setup_steps = [
             step
@@ -58,7 +63,6 @@ def test_deployment_workflows_do_not_use_keyvault_name_secret() -> None:
 
 def test_staged_workflows_resolve_config_during_validation() -> None:
     for workflow_name in (
-        "uda-dbx-service-account.yml",
         "uda-dbx-cluster-adgroup-add.yml",
         "uda-dbx-cluster-adgroup-remove.yml",
     ):
@@ -66,3 +70,18 @@ def test_staged_workflows_resolve_config_during_validation() -> None:
         resolver = next(step for step in validate_job["steps"] if step.get("id") == "environment_config")
         assert "uda/scripts/resolve_environment_config.py" in resolver["run"]
         assert validate_job["outputs"]["keyvault_name"] == "${{ steps.environment_config.outputs.keyvault_name }}"
+
+
+def test_service_account_calls_central_dbx_request_workflow() -> None:
+    workflow = _workflow("uda-dbx-service-account.yml")
+    request_job = workflow["jobs"]["service_account_request"]
+
+    assert request_job["uses"] == (
+        "54Legacy-Rogers-PoC/54legacy-Resusable-Workflows/"
+        ".github/workflows/solutions-dbx-udaa-request.yml@v1"
+    )
+    assert request_job["with"]["request-file"] == (
+        "${{ inputs.request_file || 'requests/service-account/dev/RITMDEVSA0001.yaml' }}"
+    )
+    assert request_job["with"]["apply"] == "${{ inputs.auto_apply || false }}"
+    assert request_job["secrets"] == "inherit"
