@@ -112,61 +112,26 @@ jobs:
       fmt-recursive: true
 
   terraform_plan:
-    name: Stage 3 Terraform Plan
-    runs-on: ubuntu-latest
+    name: Stage 4 Terraform Plan
     needs:
       - validate_request
       - terraform_validation
-    outputs:
-      tf_plan_status: ${{ steps.plan_status.outputs.tf_plan_status }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download generated artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: uda-cluster-adgroup-generated
-          path: generated
-
-      - name: Setup Azure + KeyVault + Terraform backend
-        uses: ./.github/workflows/setup-dbxtf-env
-        with:
-          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
-          keyvault_name: ${{ needs.validate_request.outputs.keyvault_name }}
-          databricks_host_secret_name: ${{ needs.validate_request.outputs.databricks_host_secret_name }}
-          databricks_client_id_secret_name: ${{ needs.validate_request.outputs.databricks_client_id_secret_name }}
-          databricks_client_secret_secret_name: ${{ needs.validate_request.outputs.databricks_client_secret_secret_name }}
-          databricks_tenant_id_secret_name: ${{ needs.validate_request.outputs.databricks_tenant_id_secret_name }}
-          databricks_workspace_resource_id_secret_name: ${{ needs.validate_request.outputs.databricks_workspace_resource_id_secret_name }}
-          tfstate_resource_group_secret_name: ${{ needs.validate_request.outputs.tfstate_resource_group_secret_name }}
-          tfstate_storage_account_secret_name: ${{ needs.validate_request.outputs.tfstate_storage_account_secret_name }}
-          tfstate_container_secret_name: ${{ needs.validate_request.outputs.tfstate_container_secret_name }}
-          tfstate_key_secret_name: ${{ needs.validate_request.outputs.tfstate_key_secret_name }}
-          tfstate_key_suffix: cluster-adgroup
-
-      - name: Terraform plan
-        working-directory: terraform/environments/dev
-        run: |
-          terraform plan \
-            -var-file="../../../generated/terraform.auto.tfvars.json" \
-            -out="tfplan.binary"
-          terraform show -no-color tfplan.binary > tfplan.txt
-
-      - name: Set plan status
-        id: plan_status
-        run: echo "tf_plan_status=success" >> "$GITHUB_OUTPUT"
-
-      - name: Upload terraform plan output
-        uses: actions/upload-artifact@v4
-        with:
-          name: uda-cluster-adgroup-terraform-plan
-          path: |
-            terraform/environments/dev/tfplan.binary
-            terraform/environments/dev/tfplan.txt
+    uses: 54Legacy-Rogers-PoC/54legacy-Resusable-Workflows/.github/workflows/platform-terraform-plan.yml@main
+    with:
+      working-directory: terraform/environments/dev
+      terraform-version: "1.9.8"
+      generated-artifact: uda-cluster-adgroup-generated
+      generated-path: generated
+      databricks-setup: true
+      environment-config-json: ${{ toJSON(needs.validate_request.outputs) }}
+      tfstate-key-suffix: cluster-adgroup
+      var-file: -var-file="../../../generated/terraform.auto.tfvars.json"
+      artifact-name: uda-cluster-adgroup-terraform-plan
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
   terraform_apply:
     name: Stage 4 Terraform Apply
@@ -188,7 +153,7 @@ jobs:
       - name: Download terraform plan artifact
         uses: actions/download-artifact@v4
         with:
-          name: uda-cluster-adgroup-terraform-plan
+          name: ${{ needs.terraform_plan.outputs.plan-artifact }}
           path: terraform/environments/dev
 
       - name: Setup Azure + KeyVault + Terraform backend
@@ -212,7 +177,7 @@ jobs:
 
       - name: Terraform apply
         working-directory: terraform/environments/dev
-        run: terraform apply -auto-approve tfplan.binary
+        run: terraform apply -auto-approve tfplan
 
   post_validate_cluster_access:
     name: Stage 5 Post Validation
@@ -322,7 +287,7 @@ jobs:
             echo "- AD Group Name: ${{ needs.validate_request.outputs.ad_group_name }}"
             echo "- Permission Level: ${{ needs.validate_request.outputs.cluster_permission_level }}"
             echo "- Terraform Validation Status: ${{ needs.terraform_validation.result }}"
-            echo "- Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}"
+            echo "- Plan Status: ${{ needs.terraform_plan.outputs.result }}"
             echo "- Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}"
             echo "- Post Validation Status: ${{ needs.post_validate_cluster_access.result || 'not_run' }}"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -348,7 +313,7 @@ jobs:
             AD Group Name: ${{ needs.validate_request.outputs.ad_group_name }}
             Permission Level: ${{ needs.validate_request.outputs.cluster_permission_level }}
             Terraform Validation Status: ${{ needs.terraform_validation.result }}
-            Plan Status: ${{ needs.terraform_plan.outputs.tf_plan_status }}
+            Plan Status: ${{ needs.terraform_plan.outputs.result }}
             Apply Executed: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_apply == 'true' }}
             Post Validation Status: ${{ needs.post_validate_cluster_access.result || 'not_run' }}
             Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

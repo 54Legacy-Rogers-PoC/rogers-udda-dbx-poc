@@ -86,5 +86,29 @@ def test_cluster_adgroup_add_uses_reusable_terraform_validation() -> None:
     assert "terraform_validation" in jobs["notification"]["needs"]
     assert not any(
         step.get("run", "").strip() == "terraform validate"
-        for step in jobs["terraform_plan"]["steps"]
+        for step in jobs["terraform_plan"].get("steps", [])
     )
+
+
+def test_cluster_adgroup_add_uses_reusable_terraform_plan() -> None:
+    jobs = _workflow("uda-dbx-cluster-adgroup-add.yml")["jobs"]
+    plan = jobs["terraform_plan"]
+    assert plan["uses"] == (
+        "54Legacy-Rogers-PoC/54legacy-Resusable-Workflows/"
+        ".github/workflows/platform-terraform-plan.yml@main"
+    )
+    assert not {"steps", "runs-on", "outputs"} & plan.keys()
+    assert plan["with"]["terraform-version"] == "1.9.8"
+    assert plan["with"]["databricks-setup"] is True
+    assert plan["with"]["environment-config-json"] == "${{ toJSON(needs.validate_request.outputs) }}"
+    assert plan["with"]["generated-artifact"] == "uda-cluster-adgroup-generated"
+    assert plan["with"]["tfstate-key-suffix"] == "cluster-adgroup"
+    assert set(plan["secrets"]) == {
+        "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_SUBSCRIPTION_ID", "AZURE_TENANT_ID"
+    }
+    apply_steps = jobs["terraform_apply"]["steps"]
+    download = next(step for step in apply_steps if step["name"] == "Download terraform plan artifact")
+    assert download["with"]["name"] == "${{ needs.terraform_plan.outputs.plan-artifact }}"
+    apply = next(step for step in apply_steps if step["name"] == "Terraform apply")
+    assert apply["run"] == "terraform apply -auto-approve tfplan"
+    assert "outputs.tf_plan_status" not in (WORKFLOW_DIR / "uda-dbx-cluster-adgroup-add.yml").read_text()
